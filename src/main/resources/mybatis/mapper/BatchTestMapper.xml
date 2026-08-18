@@ -1,0 +1,89 @@
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.template.mybatis.mapper.BatchTestMapper">
+
+    <select id="queryAll" resultType="BatchTest">
+        select id, string_field1, string_field2, string_field3, string_field4, string_field5, string_field6, string_field7, string_field8, string_field9, string_field10, create_time,update_time
+        from batch_test
+    </select>
+
+    <select id="query" resultType="BatchTest">
+        select id, string_field1, string_field2, string_field3, string_field4, string_field5, string_field6, string_field7, string_field8, string_field9, string_field10, create_time,update_time
+        from batch_test
+        order by id
+        limit #{param1}
+        <if test="param2 != null">
+            , #{param2}
+        </if>
+    </select>
+
+    <select id="queryOptimal" resultType="BatchTest">
+        SELECT id, string_field1, string_field2, string_field3, string_field4, string_field5, string_field6, string_field7, string_field8, string_field9, string_field10, create_time,update_time
+        FROM batch_test
+        WHERE id >= (
+            SELECT id FROM batch_test order by id limit #{param1}, 1
+        ) order by id
+        limit #{param2}
+    </select>
+
+    <select id="queryOptimalJoin" resultType="BatchTest">
+        SELECT b.id, string_field1, string_field2, string_field3, string_field4, string_field5, string_field6, string_field7, string_field8, string_field9, string_field10, create_time, update_time
+        FROM ( SELECT id FROM batch_test order by id limit #{param1}, #{param2} ) AS a inner join batch_test b on a.id = b.id
+        order by id
+        limit #{param2}
+    </select>
+
+    <select id="queryOptimalAssociate" resultType="BatchTest">
+        SELECT b.id, string_field1, string_field2, string_field3, string_field4, string_field5, string_field6, string_field7, string_field8, string_field9, string_field10, create_time, update_time
+        FROM ( SELECT id FROM batch_test order by id limit #{param1}, #{param2} ) a, batch_test b
+        WHERE a.id = b.id
+        order by id
+    </select>
+
+    <select id="queryOptimalPrimaryId" resultType="BatchTest">
+        SELECT id, string_field1, string_field2, string_field3, string_field4, string_field5, string_field6, string_field7, string_field8, string_field9, string_field10, create_time, update_time
+        FROM batch_test
+        WHERE id > #{param1}
+        order by id
+        limit #{param2}
+    </select>
+
+    <insert id="insertBatchTest" parameterType="BatchTest">
+        INSERT INTO batch_test(string_field1, string_field2, string_field3, string_field4, string_field5, string_field6, string_field7, string_field8, string_field9, string_field10, create_time, update_time)
+        VALUES (#{stringField1}, #{stringField2}, #{stringField3}, #{stringField4}, #{stringField5}, #{stringField6}, #{stringField7}, #{stringField8}, #{stringField9}, #{stringField10}, NOW(), NOW());
+    </insert>
+
+    <insert id="batchInsertBatchTest" parameterType="java.util.List">
+        INSERT INTO batch_test(string_field1, string_field2, string_field3, string_field4, string_field5, string_field6, string_field7, string_field8, string_field9, string_field10, create_time, update_time)
+        VALUES
+        <foreach collection="list" item="it" separator=",">
+            (#{it.stringField1}, #{it.stringField2}, #{it.stringField3}, #{it.stringField4}, #{it.stringField5}, #{it.stringField6}, #{it.stringField7}, #{it.stringField8}, #{it.stringField9}, #{it.stringField10}, NOW(), NOW())
+        </foreach>
+    </insert>
+
+    <!--
+    <update id="updateBatchTestById">
+        UPDATE batch_test
+        SET stringField1 = #{entity.stringField1} , update_time = NOW()
+        WHERE id = #{id}
+    </update>
+    -->
+
+    <update id="updateBatchTestById">
+        UPDATE batch_test
+        <set>
+            <if test="param2.stringField1 != null"> string_field1 = #{param2.stringField1}, </if>
+            <if test="param2.stringField2 != null"> string_field2 = #{param2.stringField2}, </if>
+            <if test="param2.stringField3 != null"> string_field3 = #{param2.stringField3}, </if>
+            <if test="param2.stringField4 != null"> string_field4 = #{param2.stringField4}, </if>
+            <if test="param2.stringField5 != null"> string_field5 = #{param2.stringField5}, </if>
+            <if test="param2.stringField6 != null"> string_field6 = #{param2.stringField6}, </if>
+            <if test="param2.stringField7 != null"> string_field7 = #{param2.stringField7}, </if>
+            <if test="param2.stringField8 != null"> string_field8 = #{param2.stringField8}, </if>
+            <if test="param2.stringField9 != null"> string_field9 = #{param2.stringField9}, </if>
+            <if test="param2.stringField10 != null"> string_field10 = #{param2.stringField10}, </if>
+            update_time = NOW()
+        </set>
+        WHERE id = #{param1}
+    </update>
+
+</mapper>

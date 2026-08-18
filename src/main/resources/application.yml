@@ -1,0 +1,216 @@
+server:
+  port: 34567
+
+spring:
+  application:
+    name: SpringBootTemplate
+  profiles:
+    active: prod
+  config:
+    import:
+      # 优先级：nacos (import 列表里面后面的配置优先级高） > 本地 (application.yml)
+      - optional:nacos:${spring.application.name}.yml
+      - optional:nacos:${spring.application.name}-${spring.profiles.active}.yml
+  cloud:
+    inetutils:
+      preferredNetworks:
+        - 10.4
+    nacos:
+      server-addr: 127.0.0.1:8848
+#      username: nacos
+#      password: nacos
+      config:
+        enabled: true
+        file-extension: yml
+      discovery:
+        enabled: true
+
+    # openfeign
+    openfeign:
+      okhttp:
+        # 必须显式关闭，避免多个客户端实现同时满足条件导致不确定行为
+        enabled: false
+      # 底层HTTP客户端换成HttpClient(默认是JDK自带的HttpURLConnection，性能较差，不支持连接池)
+      httpclient:
+        # 关闭SSL证书校验
+        disable-ssl-validation: true
+        # 开启hc5，关闭其他实现，避免多个HTTP客户端实现同时存在classpath导致行为不确定
+        hc5:
+          # 务必显式设置成true，不要依赖默认值
+          enabled: true
+
+      # 压缩请求/响应，减少网络传输开销
+      compression:
+        request:
+          enabled: true
+          mime-types: text/xml,application/xml,application/json
+          min-request-size: 2048
+        response:
+          enabled: true
+
+      # 开启日志(排查问题用，生产环境建议basic级别，避免日志量过大)
+      client:
+        config:
+          default:
+            logger-level: basic
+            connect-timeout: 3000       # 建连超时
+            read-timeout: 5000           # 读取超时，需要结合下游接口实际响应时间调整
+            # 重试配置(默认Feign不重试，需要显式开启)
+
+  # 以下数据源配置为本地开发占位值（localhost:3306 / test / root / mysql）
+  datasource:
+    type: com.zaxxer.hikari.HikariDataSource
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://127.0.0.1:3306/test?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password: mysql
+    hikari:
+      # 连接池名称，多数据源场景下方便区分日志/监控指标
+      pool-name: HikariPool-TemplateService
+      # 最大连接数：核心参数，需要结合数据库最大连接数、应用实例数一起算
+      # 经验公式: ((core_count * 2) + effective_spindle_count)，简单场景可以从10开始压测调整
+      maximum-pool-size: 20
+      # 最小空闲连接数：保持的常驻连接，避免高峰期现建连接的延迟开销
+      # HikariCP官方建议：如果没有明确理由，minimum-idle应该跟maximum-pool-size保持一致
+      # 固定大小的连接池在生产环境表现更稳定、更可预测，波动连接池反而容易引发性能抖动
+      minimum-idle: 20
+      # 从连接池获取连接的最大等待时间，超时抛异常而不是无限期卡住
+      connection-timeout: 30000
+      # 连接在池中最大空闲时间，超过这个时间空闲连接会被回收(前提是连接数依然大于minimum-idle)
+      idle-timeout: 600000
+      # 连接的最大生命周期，到期后即使正在使用也会被安全地关闭重建
+      # 这个值必须比MySQL自身的wait_timeout(默认8小时)小，
+      # 否则MySQL端会先把"看起来还在池子里"的连接断开，
+      # 应用这边却不知道，下次用到时才发现连接已经失效，抛异常
+      max-lifetime: 1800000
+      # 连接泄漏检测：超过这个时间连接还没被归还，会打印警告日志(排查连接泄漏问题的利器)
+      # 生产环境建议开启，设为比正常业务SQL执行时间稍长的值
+      leak-detection-threshold: 60000
+      # 连接有效性检测查询(MySQL 5.6+建议用JDBC4的isValid()方法，不需要手动写这个)
+      # connection-test-query: SELECT 1
+      # 是否在连接归还池中之前自动提交，一般保持默认true即可(除非你手动管理事务)
+      auto-commit: true
+
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      password: redis
+      database: 5
+      # 连接建立超时时间
+      connect-timeout: 3000ms
+      # 单条命令执行超时时间
+      timeout: 3000ms
+      # Lettuce连接池配置(默认客户端就是lettuce，不用额外指定client-type)
+      lettuce:
+        pool:
+          enabled: true
+          # 连接池最大连接数，负数表示不限制(不建议用负数，容易在异常场景下把Redis连接打爆)
+          # max-active = (应用实例数 * 最大并发线程数) * 1.2
+          # 例如：2个实例，每个实例最大线程数（如 tomcat.threads.max）为 50
+          # 则可设置为 (2 * 50) * 1.2 ≈ 120
+          # 但最终值绝不能超过 Redis 服务器端的 maxclients 配置，并要为其预留一部分。
+          max-active: 20
+          # 连接池最大空闲连接数，建议是 max-active 的 1/2 到 2/3
+          max-idle: 10
+          # 连接池最小空闲连接数(保持一定数量的热连接，避免每次现建连接的开销)，用于维持 warm-up，避免突发流量
+          min-idle: 5
+          # 连接池最大阻塞等待时间，超过这个时间还拿不到连接就抛异常，而不是无限等待
+          max-wait: 3000ms
+          # 连接空闲多久后被回收判定的检测周期
+          time-between-eviction-runs: 30000ms
+        # 关闭连接池时的超时时间(优雅关闭用，配合你之前问的容器优雅关闭场景)
+        shutdown-timeout: 200ms
+
+# com.baomidou.mybatisplus.autoconfigure.MybatisPlusProperties
+mybatis-plus:
+  config-location: classpath:mybatis/mybatis.conf
+  mapper-locations: classpath*:mybatis/mapper/*.xml
+  type-aliases-package: com.example.template.mybatis.entity
+  global-config:
+    db-config:
+      id-type: auto
+
+feign:
+  pool:
+    # 整个应用所有Feign调用共享的连接池总大小
+    max-total: 200
+    # 单个下游服务最大占用连接数
+    max-per-route: 50
+
+# 本地开发时打印 MyBatis-Plus 执行的 SQL，便于联调排查；生产环境按需调低。
+logging:
+  # 文件名如果就叫 log4j2-spring.xml 放在 resources 根目录，Spring Boot能自动识别，
+  # 这行其实可以省略，但显式写出更清晰不容易踩坑
+  config: classpath:log4j2-spring.xml
+  level:
+    com.example.template: debug
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+    enabled: true
+
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+    operations-sorter: method     # 接口按HTTP方法排序，而不是默认的声明顺序，阅读体验更好
+    tags-sorter: alpha
+    try-it-out-enabled: false     # 生产环境建议关闭"直接在页面上发起真实请求"这个功能
+    disable-swagger-default-url: true
+
+  # 只扫描指定包路径，避免扫描到不必要的类拖慢启动、暴露不该暴露的接口
+  packages-to-scan: com.example.template.controller
+  # paths-to-match: /api/**
+
+  # 生产环境关闭默认的"try it out"发起真实请求，只保留文档展示功能
+  default-produces-media-type: application/json
+
+# actuator 监控
+management:
+#  server:
+#    # actuator独立端口，防火墙层面隔离，不对外网暴露
+#    port: 34568
+  endpoints:
+    web:
+      base-path: /actuator
+      exposure:
+        # 只暴露必要的端点，其他一律不开放
+        include: health,info,prometheus,metrics
+    access:
+      # 白名单模式，未单独配置的端点一律禁止
+      default: none
+      # 全局硬上限，即使某端点单独配了unrestricted也不会超出这个限制
+      max-permitted: read-only
+  endpoint:
+    health:
+      access: unrestricted
+      # 显示健康检查详情的权限控制: never/when-authorized/always
+      # 生产环境不建议用always(会暴露数据库/磁盘等内部组件详情给未授权访问者)
+      show-details: never
+      show-components: never
+      # K8s专用liveness/readiness探针端点
+      probes:
+        enabled: true
+    info:
+      access: unrestricted
+    prometheus:
+      access: unrestricted
+    metrics:
+      access: unrestricted
+  metrics:
+    tags:
+      # 给所有指标打上应用名标签，多应用场景下Grafana筛选方便(对应nodename/application变量联动)
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http:
+          server:
+            # 开启HTTP请求耗时的P50/P95/P99分位数统计
+            requests: true
+    enable:
+      hikaricp: true        # 数据库连接池指标(HikariCP场景)
+      lettuce: true         # Redis连接池指标(Lettuce场景)
+      jvm: true
+      process: true
+      system: true

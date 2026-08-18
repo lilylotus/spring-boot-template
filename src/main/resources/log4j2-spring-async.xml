@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- monitorInterval: 每30秒检测一次配置文件是否变更，支持不重启应用热更新日志级别 -->
+<Configuration status="WARN" monitorInterval="30">
+
+    <Properties>
+        <Property name="LOG_PATTERN">
+            %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%X{traceId}] - %msg%n
+        </Property>
+        <Property name="LOG_HOME">./logs</Property>
+    </Properties>
+
+    <Appenders>
+        <!-- 控制台输出，本地开发方便查看，生产环境可以按需关闭 -->
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="${LOG_PATTERN}"/>
+        </Console>
+
+        <!-- 应用日志: 按天滚动，每天最多10个文件，保留7天 -->
+        <RollingFile name="AppLogFile"
+                     fileName="${LOG_HOME}/app.log"
+                     filePattern="${LOG_HOME}/app-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="${LOG_PATTERN}"/>
+            <Policies>
+                <!-- 按天触发滚动 -->
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+                <!-- 单个文件超过200MB也触发滚动，配合下面的max="10"控制每天最多10个文件 -->
+                <SizeBasedTriggeringPolicy size="200MB"/>
+            </Policies>
+            <!-- max="10": 每天最多10个文件(超过后最旧的会被覆盖，配合下面Delete策略做真正的7天清理) -->
+            <DefaultRolloverStrategy max="10">
+                <Delete basePath="${LOG_HOME}" maxDepth="1">
+                    <IfFileName glob="app-*.log.gz"/>
+                    <!-- 保留7天，超过的自动删除 -->
+                    <IfLastModified age="7d"/>
+                </Delete>
+            </DefaultRolloverStrategy>
+        </RollingFile>
+
+        <!-- 错误日志单独分离一份，方便快速定位问题，不用在海量INFO日志里翻找 -->
+        <RollingFile name="ErrorLogFile"
+                     fileName="${LOG_HOME}/error.log"
+                     filePattern="${LOG_HOME}/error-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="${LOG_PATTERN}"/>
+            <Filters>
+                <ThresholdFilter level="ERROR" onMatch="ACCEPT" onMismatch="DENY"/>
+            </Filters>
+            <Policies>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+                <SizeBasedTriggeringPolicy size="200MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="10">
+                <Delete basePath="${LOG_HOME}" maxDepth="1">
+                    <IfFileName glob="error-*.log.gz"/>
+                    <IfLastModified age="7d"/>
+                </Delete>
+            </DefaultRolloverStrategy>
+        </RollingFile>
+
+        <!-- 异步Appender包装上面的RollingFile，实现异步写日志(减少I/O阻塞主线程) -->
+        <Async name="AsyncAppLogFile" bufferSize="8192">
+            <AppenderRef ref="AppLogFile"/>
+            <!-- 队列满时的处理策略: Discard丢弃低优先级日志(比如INFO)，避免日志把应用拖垮 -->
+            <BlockingQueueFactory/>
+        </Async>
+
+        <Async name="AsyncErrorLogFile" bufferSize="8192">
+            <AppenderRef ref="ErrorLogFile"/>
+        </Async>
+    </Appenders>
+
+    <Loggers>
+        <!-- 业务代码包路径的日志级别 -->
+        <Logger name="com.example" level="INFO" additivity="false">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="AsyncAppLogFile"/>
+            <AppenderRef ref="AsyncErrorLogFile"/>
+        </Logger>
+
+        <!-- 降低第三方框架日志噪音 -->
+        <Logger name="org.springframework" level="WARN"/>
+        <Logger name="com.alibaba.nacos" level="WARN"/>
+        <Logger name="com.netflix.discovery" level="WARN"/>
+
+        <Root level="INFO">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="AsyncAppLogFile"/>
+            <AppenderRef ref="AsyncErrorLogFile"/>
+        </Root>
+    </Loggers>
+
+</Configuration>
