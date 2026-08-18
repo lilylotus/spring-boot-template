@@ -32,13 +32,20 @@ it's the main value of this repo as a template.
 4. **所有编写的文档一律使用中文，不使用英文**（如 OpenSpec 的 `proposal.md`/`design.md`/`tasks.md`、
    代码注释、README 等说明性文档）。代码本身的标识符（类名、方法名、变量名）、日志格式、配置
    键名等技术标识符仍按语言/框架惯例使用英文，仅文档性文字内容需要用中文书写。
-5. **Git 提交信息遵循 Conventional Commits 规范**：`<type>[optional scope]: <description>`，
-   常用 `type` 有 `feat`（新功能）、`fix`（修复）、`docs`（仅文档改动，含 OpenSpec 文档）、
-   `refactor`（不改变行为的重构）、`perf`（性能优化）、`test`（测试相关）、`build`（构建/依赖，
-   如 `build.gradle`）、`ci`、`chore`（杂项）、`revert`（回滚）。破坏性变更在 `type`/`scope`
-   后加 `!`（如 `feat!:`）或在正文/脚注写 `BREAKING CHANGE:` 说明。`type`/`scope`/`!` 这些是
-   规范固定的英文关键字，不受第 4 条"文档一律中文"约束；`description` 及提交正文（body/footer）
-   按第 4 条用中文书写即可。一次提交只做一件逻辑上独立的事，避免把无关改动混进同一条提交信息里。
+5. **Git 提交信息遵循 Conventional Commits 规范，且 `scope` 必填**：格式固定为
+   `<type>(<scope>): <subject>`，不写成省略 `scope` 的 `<type>: <subject>`。常用 `type` 有
+   `feat`（新功能）、`fix`（修复）、`docs`（仅文档改动，含 OpenSpec 文档）、`refactor`
+   （不改变行为的重构）、`perf`（性能优化）、`test`（测试相关）、`build`（构建/依赖，如
+   `build.gradle`）、`ci`、`chore`（杂项）、`revert`（回滚）。`scope` 用改动所在的模块/包名
+   （如 `redis`、`thread-pool`、`mybatis`、`openfeign`、`config`、`openspec`、`gradle`
+   等），改动横跨多个模块、找不到合适单一 `scope` 时才允许省略括号退化为 `<type>: <subject>`。
+   破坏性变更在 `type`/`scope` 后加 `!`（如 `feat(redis)!:`）或在正文/脚注写
+   `BREAKING CHANGE:` 说明。`type`/`scope`/`!` 这些是规范固定的英文关键字，不受第 4 条
+   "文档一律中文"约束；`subject` 及提交正文（body/footer）按第 4 条用中文书写即可。一次提交
+   只做一件逻辑上独立的事，避免把无关改动混进同一条提交信息里。
+6. **提交信息中不要包含 `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>` 这类署名脚注**。
+   这条覆盖 Claude Code 默认会在提交信息末尾追加该署名的行为——本仓库的提交信息到 `footer`
+   为止即可，不再额外加这一行。
 
 ## Build, run, test
 
