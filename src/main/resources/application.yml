@@ -176,7 +176,9 @@ management:
       base-path: /actuator
       exposure:
         # 只暴露必要的端点，其他一律不开放
-        include: health,info,prometheus,metrics
+        include: 'health,info,prometheus,metrics'
+        #双重保险: 连HTTP暴露层面也全部排除，即使某处意外单独放开了某个端点，也进不来HTTP请求
+        #exclude: "*"
     access:
       # 白名单模式，未单独配置的端点一律禁止
       default: none

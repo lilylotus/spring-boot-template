@@ -5,7 +5,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 
 import java.util.Map;
 
-@FeignClient(name = "boot", url = "http://127.0.0.1:30040")
+@FeignClient(name = "BootDemo")
+//@FeignClient(name = "BootDemo", url = "http://127.0.0.1:34567")
 public interface HelloOpenFeign {
 
     @GetMapping("/welcome")
