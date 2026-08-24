@@ -57,6 +57,15 @@ dependencies {
     implementation 'io.github.openfeign:feign-hc5:13.9.2'
     implementation 'org.springframework.cloud:spring-cloud-starter-openfeign'
     implementation 'org.springframework.cloud:spring-cloud-starter-loadbalancer'
+    implementation 'org.springframework.cloud:spring-cloud-starter-circuitbreaker-resilience4j'
+    /* spring-cloud-starter-circuitbreaker-resilience4j 只带来了断路器/重试/限流器/超时限制，
+       隔板(Bulkhead)模块未被间接引入，需要单独声明；版本沿用spring-cloud-dependencies BOM的托管版本 */
+    implementation 'io.github.resilience4j:resilience4j-bulkhead'
+    /* resilience4j-spring6 里的 CircuitBreakerAspect/RetryAspect/RateLimiterAspect/BulkheadAspect
+       都是@Aspect类，依赖AspectJ的注解切点解析能力才能被Spring AOP识别并生效；只有spring-aop
+       (Spring自身的动态代理AOP)是不够的，必须显式引入这个starter带上aspectjweaver，否则
+       @CircuitBreaker等注解会被静默忽略，方法照常抛出原始异常，fallback永远不会被调用 */
+    implementation 'org.springframework.boot:spring-boot-starter-aop'
 
     implementation 'org.springframework.cloud:spring-cloud-starter'
     implementation "com.alibaba.cloud:spring-cloud-starter-alibaba-nacos-config:${CloudAliNacosVersion}"

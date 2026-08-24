@@ -16,7 +16,7 @@ spring:
       preferredNetworks:
         - 10.4
     nacos:
-      server-addr: 127.0.0.1:8848
+      server-addr: 10.4.100.124:8848
 #      username: nacos
 #      password: nacos
       config:
@@ -61,7 +61,7 @@ spring:
   datasource:
     type: com.zaxxer.hikari.HikariDataSource
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://127.0.0.1:3306/test?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://10.4.100.124:3306/test?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: root
     password: mysql
     hikari:
@@ -93,7 +93,7 @@ spring:
 
   data:
     redis:
-      host: 127.0.0.1
+      host: 10.4.100.124
       port: 6379
       password: redis
       database: 5
@@ -216,3 +216,48 @@ management:
       jvm: true
       process: true
       system: true
+
+# resilience4j 容错组件配置，实例名统一叫 demo，与 com.example.template.resilience4j 包下
+# 各示例类注解里的 name = "demo" 一一对应，方便直接照抄改造成自己的实例名/参数
+resilience4j:
+  circuitbreaker:
+    instances:
+      demo:
+        # 滑动窗口统计方式：COUNT_BASED按调用次数统计，TIME_BASED按时间窗口统计
+        sliding-window-type: COUNT_BASED
+        # 滑动窗口大小：断路器统计最近多少次调用的结果来计算失败率
+        sliding-window-size: 10
+        # 触发熔断判定所需的最小调用次数：窗口内调用次数不足这个数时，即使全部失败也不会熔断，
+        # 避免服务刚启动、样本量太少时被误判为故障
+        minimum-number-of-calls: 5
+        # 失败率阈值(%)：滑动窗口内的失败率超过这个比例，断路器从CLOSED切换到OPEN
+        failure-rate-threshold: 50
+        # OPEN状态下的等待时间：超过这个时间后自动尝试切换到HALF_OPEN，放行少量探测请求
+        wait-duration-in-open-state: 10s
+        # HALF_OPEN状态下允许放行的探测调用数，根据这些调用的结果决定回到CLOSED还是重新OPEN
+        permitted-number-of-calls-in-half-open-state: 3
+        # OPEN到HALF_OPEN是否自动转换；false则需要手动调用API触发，这里用true演示自动恢复的效果
+        automatic-transition-from-open-to-half-open-enabled: true
+  retry:
+    instances:
+      demo:
+        # 最大尝试次数(含第一次调用)：例如配置为3表示失败后最多再重试2次
+        max-attempts: 3
+        # 每次重试之间的等待间隔
+        wait-duration: 500ms
+  ratelimiter:
+    instances:
+      demo:
+        # 每个刷新周期内允许通过的请求数，配置得较小是为了方便演示限流拒绝效果
+        limit-for-period: 2
+        # 限流许可数的刷新周期，每过一个周期许可数重新计满
+        limit-refresh-period: 10s
+        # 获取许可的最大等待时间：配置为0表示许可不足时立即拒绝，不排队等待，直接走fallback
+        timeout-duration: 0s
+  bulkhead:
+    instances:
+      demo:
+        # 允许同时执行的最大并发调用数，配置得较小是为了方便演示隔板拒绝效果
+        max-concurrent-calls: 2
+        # 并发数已满时，等待获取执行许可的最大时长：配置为0表示不排队，立即拒绝并走fallback
+        max-wait-duration: 0s
