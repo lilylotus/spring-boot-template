@@ -13,6 +13,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.validation.BindException;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.ObjectError;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -36,6 +37,7 @@ public class GlobalExceptionHandler {
     private static final String VALIDATION_ERROR_MESSAGE = "请求参数校验失败";
     private static final String PARAMETER_ERROR_MESSAGE = "请求参数错误";
     private static final String REQUEST_BODY_ERROR_MESSAGE = "请求体格式错误";
+    private static final String UNSUPPORTED_MEDIA_TYPE_MESSAGE = "请求媒体类型不支持";
     private static final String INTERNAL_ERROR_MESSAGE = "服务器内部错误";
 
     /**
@@ -130,6 +132,21 @@ public class GlobalExceptionHandler {
     public ResponseEntity<RestResult<Void>> handleHttpMessageNotReadable(
         HttpMessageNotReadableException exception) {
         return badRequest(REQUEST_BODY_ERROR_MESSAGE);
+    }
+
+    /**
+     * 处理请求 Content-Type 与接口声明的媒体类型不匹配产生的异常。
+     *
+     * @param exception 不受支持的请求媒体类型异常
+     * @return HTTP 415 统一错误响应
+     */
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<RestResult<Void>> handleHttpMediaTypeNotSupported(
+        HttpMediaTypeNotSupportedException exception) {
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+            .body(RestResultUtils.failure(
+                HttpStatus.UNSUPPORTED_MEDIA_TYPE.value(),
+                UNSUPPORTED_MEDIA_TYPE_MESSAGE));
     }
 
     /**
