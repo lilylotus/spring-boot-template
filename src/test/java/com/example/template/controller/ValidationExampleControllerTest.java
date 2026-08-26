@@ -200,6 +200,19 @@ class ValidationExampleControllerTest {
     }
 
     @Test
+    void shouldHandleNoResourceFound() throws Exception {
+        mockMvc.perform(get("/does-not-exist")
+                .header("X-Trace-Id", TRACE_ID))
+            .andExpect(status().isNotFound())
+            .andExpect(header().string("X-Trace-Id", TRACE_ID))
+            .andExpect(jsonPath("$.code").value(404))
+            .andExpect(jsonPath("$.data").value(nullValue()))
+            .andExpect(jsonPath("$.message").value("请求的资源不存在"))
+            .andExpect(jsonPath("$.traceId").value(TRACE_ID))
+            .andExpect(jsonPath("$.timestamp").isNumber());
+    }
+
+    @Test
     void shouldHideUnexpectedExceptionDetails() throws Exception {
         mockMvc.perform(get("/test/unexpected-error")
                 .header("X-Trace-Id", TRACE_ID))

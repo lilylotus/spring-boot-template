@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import com.example.template.response.RestResult;
 import com.example.template.response.RestResultUtils;
@@ -38,6 +39,7 @@ public class GlobalExceptionHandler {
     private static final String PARAMETER_ERROR_MESSAGE = "请求参数错误";
     private static final String REQUEST_BODY_ERROR_MESSAGE = "请求体格式错误";
     private static final String UNSUPPORTED_MEDIA_TYPE_MESSAGE = "请求媒体类型不支持";
+    private static final String RESOURCE_NOT_FOUND_MESSAGE = "请求的资源不存在";
     private static final String INTERNAL_ERROR_MESSAGE = "服务器内部错误";
 
     /**
@@ -147,6 +149,21 @@ public class GlobalExceptionHandler {
             .body(RestResultUtils.failure(
                 HttpStatus.UNSUPPORTED_MEDIA_TYPE.value(),
                 UNSUPPORTED_MEDIA_TYPE_MESSAGE));
+    }
+
+    /**
+     * 处理请求路径未匹配任何静态资源或处理器产生的异常。
+     * <p>
+     * 该异常属于客户端请求路径不存在，比通用兜底异常更具体，Spring 会优先匹配到此处理器，
+     * 因此不会落入 {@link #handleUnexpectedException}，也就不会被记为服务器内部错误。
+     *
+     * @param exception 找不到资源异常
+     * @return HTTP 404 统一错误响应
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<RestResult<Void>> handleNoResourceFound(NoResourceFoundException exception) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(RestResultUtils.failure(HttpStatus.NOT_FOUND.value(), RESOURCE_NOT_FOUND_MESSAGE));
     }
 
     /**
