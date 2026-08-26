@@ -1,0 +1,46 @@
+plugins {
+    id 'java'
+    id 'java-library'
+}
+
+group = 'org.example.simple'
+version = '1.0-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    maven { url = 'https://maven.aliyun.com/repository/public/' }
+    mavenCentral()
+}
+
+dependencies {
+
+    implementation 'ch.qos.logback:logback-classic:1.6.2'
+
+    /* Netty 实现 RPC 高性能通信 */
+    implementation 'io.netty:netty-all:4.2.16.Final'
+    implementation 'tools.jackson.core:jackson-databind:3.2.2'
+
+    /* 日常工具依赖 */
+    implementation 'commons-io:commons-io:2.22.0'
+    implementation 'org.apache.commons:commons-collections4:4.6.0'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation platform('org.junit:junit-bom:5.10.0')
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+/* Gradle 指定编码,Java 编译的时候缺省状态下会因为中文字符而失败 */
+[compileJava, compileTestJava, javadoc]*.options*.encoding = 'UTF-8'
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.compilerArgs << "-Xlint:deprecation"
+}

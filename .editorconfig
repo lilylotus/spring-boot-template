@@ -1,0 +1,81 @@
+# EditorConfig 帮助多人协作时保持一致的编码风格
+# 官网: https://editorconfig.org
+# IntelliJ IDEA 原生支持；VS Code需装 EditorConfig for VS Code 插件
+
+# 表示这是根配置文件，工具会停止向上级目录查找
+root = true
+
+# ========================================
+# 所有文件通用的默认规则
+# ========================================
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# ========================================
+# Java 源码文件
+# ========================================
+[*.java]
+max_line_length = 120
+
+# ========================================
+# XML 配置文件 (Maven pom.xml、旧式Spring xml配置、MyBatis mapper等)
+# ========================================
+[*.xml]
+indent_style = space
+indent_size = 4
+
+# ========================================
+# YAML 配置文件 (application.yml 等，Spring Boot主流配置格式)
+# ========================================
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+# ========================================
+# Properties 配置文件 (application.properties)
+# ========================================
+[*.properties]
+indent_style = space
+indent_size = 4
+
+# ========================================
+# JSON 文件
+# ========================================
+[*.json]
+indent_style = space
+indent_size = 2
+
+# ========================================
+# SQL 文件 (数据库迁移脚本、建表语句等)
+# ========================================
+[*.sql]
+indent_style = space
+indent_size = 4
+
+# ========================================
+# Markdown 文档：不清理行尾空格
+# 因为Markdown语法里"行尾两个空格"表示强制换行，是有意义的语法，不能当垃圾清掉
+# ========================================
+[*.md]
+indent_style = tab
+trim_trailing_whitespace = false
+max_line_length = off
+
+# ========================================
+# Shell 脚本
+# ========================================
+[*.sh]
+indent_style = space
+indent_size = 2
+end_of_line = lf
+
+# ========================================
+# Windows批处理文件：保留CRLF换行符(Windows原生习惯)
+# ========================================
+[*.{bat,cmd}]
+end_of_line = crlf
