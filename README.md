@@ -1,24 +1,3 @@
----
-title: "SpringBoot项目初始化基础配置"
-subtitle: "SpringBoot项目初始化基础配置|SpringBoot项目初始化配置"
-description: "SpringBoot项目初始化基础配置|SpringBoot项目初始化配置"
-date: 2026-08-16T15:00:00+08:00
-lastmod: 2026-08-16T15:00:00+08:00
-draft: false
-
-authors: ["yzx"]
-tags: ["Spring Boot"]
-categories: ["Spring Boot"]
-series: []
-
-featuredImage: "https://www.nihility.cn/files/images/IMG_2640.JPG"
-featuredImagePreview: ""
-
-lightgallery: true
-math:
-  enable: true
----
-
 # SpringBoot项目初始化
 
 [SpringBoot 更新版本列表](https://spring.io/projects/spring-boot#learn)
