@@ -1,48 +1,15 @@
-# actuator 监控
 management:
-  #  server:
-  #    # actuator独立端口，防火墙层面隔离，不对外网暴露
-  #    port: 34568
+  # Disabling HTTP Endpoints
+  server:
+    port: -1
   endpoints:
-    web:
-      base-path: /actuator
-      exposure:
-        # 只暴露必要的端点，其他一律不开放
-        include: health,info,prometheus,metrics
     access:
-      # 白名单模式，未单独配置的端点一律禁止
+      # 端点本身不创建
       default: none
-      # 全局硬上限，即使某端点单独配了unrestricted也不会超出这个限制
-      max-permitted: read-only
-  endpoint:
-    health:
-      access: unrestricted
-      # 显示健康检查详情的权限控制: never/when-authorized/always
-      # 生产环境不建议用always(会暴露数据库/磁盘等内部组件详情给未授权访问者)
-      show-details: never
-      show-components: never
-      # K8s专用liveness/readiness探针端点
-      probes:
-        enabled: true
-    info:
-      access: unrestricted
-    prometheus:
-      access: unrestricted
-    metrics:
-      access: unrestricted
-  metrics:
-    tags:
-      # 给所有指标打上应用名标签，多应用场景下Grafana筛选方便(对应nodename/application变量联动)
-      application: ${spring.application.name}
-    distribution:
-      percentiles-histogram:
-        http:
-          server:
-            # 开启HTTP请求耗时的P50/P95/P99分位数统计
-            requests: true
-    enable:
-      hikaricp: true        # 数据库连接池指标(HikariCP场景)
-      lettuce: true         # Redis连接池指标(Lettuce场景)
-      jvm: true
-      process: true
-      system: true
+    web:
+      exposure:
+        # 已创建的端点也不通过 HTTP 暴露
+        exclude: "*"
+      discovery:
+        # 关闭 /actuator 发现页本身
+        enabled: false
