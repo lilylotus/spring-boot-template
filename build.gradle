@@ -21,6 +21,9 @@ dependencies {
 
     implementation 'ch.qos.logback:logback-classic:1.6.2'
 
+    /* httpclient 工具依赖 */
+    implementation 'org.apache.httpcomponents.client5:httpclient5:5.6.4'
+
     /* Netty 实现 RPC 高性能通信 */
     implementation 'io.netty:netty-all:4.2.16.Final'
     implementation 'tools.jackson.core:jackson-databind:3.2.2'
