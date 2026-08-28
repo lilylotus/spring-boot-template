@@ -26,6 +26,7 @@ import org.apache.hc.client5.http.entity.UrlEncodedFormEntity;
 import org.apache.hc.client5.http.entity.mime.MultipartEntityBuilder;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClientBuilder;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
 import org.apache.hc.client5.http.ssl.ClientTlsStrategyBuilder;
 import org.apache.hc.client5.http.ssl.NoopHostnameVerifier;
@@ -39,7 +40,10 @@ import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.core5.http.io.entity.FileEntity;
 import org.apache.hc.core5.http.message.BasicNameValuePair;
 import org.apache.hc.core5.net.URIBuilder;
+import org.apache.hc.core5.pool.PoolConcurrencyPolicy;
+import org.apache.hc.core5.pool.PoolReusePolicy;
 import org.apache.hc.core5.ssl.SSLContextBuilder;
+import org.apache.hc.core5.util.TimeValue;
 import org.apache.hc.core5.util.Timeout;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
@@ -239,20 +243,36 @@ public final class HttpClients {
     }
 
     private static CloseableHttpClient createApacheClient(HttpClientConfig config) {
+        HttpConnectionPoolConfig poolConfig = config.connectionPoolConfig();
+        HttpClientBuilder clientBuilder = org.apache.hc.client5.http.impl.classic.HttpClients.custom()
+            .setConnectionManager(createConnectionManager(config))
+            .setDefaultRequestConfig(createRequestConfig(config.connectTimeout(), config.responseTimeout()))
+            .evictExpiredConnections()
+            .evictIdleConnections(toTimeValue(poolConfig.idleEvictionTimeout(), "空闲连接回收时长"))
+            .disableAutomaticRetries();
+        return clientBuilder.build();
+    }
+
+    static PoolingHttpClientConnectionManager createConnectionManager(HttpClientConfig config) {
+        HttpConnectionPoolConfig poolConfig = config.connectionPoolConfig();
         PoolingHttpClientConnectionManagerBuilder managerBuilder =
-            PoolingHttpClientConnectionManagerBuilder.create();
+            PoolingHttpClientConnectionManagerBuilder.create()
+                .setMaxConnTotal(poolConfig.maxTotalConnections())
+                .setMaxConnPerRoute(poolConfig.maxConnectionsPerRoute())
+                .setPoolConcurrencyPolicy(PoolConcurrencyPolicy.STRICT)
+                .setConnPoolPolicy(PoolReusePolicy.LIFO)
+                .setOffLockDisposalEnabled(true);
         if (config.skipSslVerification()) {
             managerBuilder.setTlsSocketStrategy(createInsecureTlsStrategy());
         }
         managerBuilder.setDefaultConnectionConfig(ConnectionConfig.custom()
             .setConnectTimeout(toTimeout(config.connectTimeout(), "连接超时"))
-            .setSocketTimeout(toTimeout(config.requestTimeout(), "请求超时"))
+            .setSocketTimeout(toTimeout(config.responseTimeout(), "响应超时"))
+            .setTimeToLive(toTimeValue(poolConfig.connectionTimeToLive(), "连接最长存活时间"))
+            .setValidateAfterInactivity(
+                toTimeValue(poolConfig.validateAfterInactivity(), "连接空闲校验时长"))
             .build());
-        HttpClientBuilder clientBuilder = org.apache.hc.client5.http.impl.classic.HttpClients.custom()
-            .setConnectionManager(managerBuilder.build())
-            .setDefaultRequestConfig(createRequestConfig(config.requestTimeout()))
-            .disableAutomaticRetries();
-        return clientBuilder.build();
+        return managerBuilder.build();
     }
 
     private static org.apache.hc.client5.http.ssl.TlsSocketStrategy createInsecureTlsStrategy() {
@@ -269,16 +289,19 @@ public final class HttpClients {
         }
     }
 
-    private static RequestConfig createRequestConfig(Duration duration) {
-        Timeout timeout = toTimeout(duration, "请求超时");
+    static RequestConfig createRequestConfig(Duration connectTimeout, Duration responseTimeout) {
         return RequestConfig.custom()
-            .setConnectionRequestTimeout(timeout)
-            .setResponseTimeout(timeout)
+            .setConnectionRequestTimeout(toTimeout(connectTimeout, "连接超时"))
+            .setResponseTimeout(toTimeout(responseTimeout, "响应超时"))
             .build();
     }
 
     private static Timeout toTimeout(Duration duration, String name) {
         return Timeout.ofMilliseconds(HttpTimeouts.requireValid(duration, name).toMillis());
+    }
+
+    private static TimeValue toTimeValue(Duration duration, String name) {
+        return TimeValue.ofMilliseconds(HttpTimeouts.requireValid(duration, name).toMillis());
     }
 
     private static URI appendQueryParameters(String url, Map<String, List<String>> parameters) {
@@ -399,8 +422,8 @@ public final class HttpClients {
             request.headers().forEach((name, values) ->
                 values.forEach(value -> apacheRequest.addHeader(name, value)));
             request.body().ifPresent(body -> apacheRequest.setEntity(createEntity(body)));
-            Duration timeout = request.timeout().orElse(config.requestTimeout());
-            apacheRequest.setConfig(createRequestConfig(timeout));
+            Duration responseTimeout = request.timeout().orElse(config.responseTimeout());
+            apacheRequest.setConfig(createRequestConfig(config.connectTimeout(), responseTimeout));
             return apacheRequest;
         }
 

@@ -17,6 +17,8 @@ import java.util.concurrent.TimeoutException;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -70,6 +73,7 @@ class HttpClientsTest {
             respond(exchange, 200, "完成");
         });
         server.createContext("/blocking", exchange -> {
+            remotePorts.add(exchange.getRemoteAddress().getPort());
             blockingRequestStarted.countDown();
             try {
                 releaseBlockingRequest.await();
@@ -213,10 +217,10 @@ class HttpClientsTest {
     }
 
     @Test
-    void requestTimeoutOverridesDefaultWithoutChangingFollowingRequests() {
+    void responseTimeoutOverridesDefaultWithoutChangingFollowingRequests() {
         HttpClients.configure(HttpClientConfig.builder()
             .connectTimeout(Duration.ofSeconds(2))
-            .requestTimeout(Duration.ofMillis(100))
+            .responseTimeout(Duration.ofMillis(100))
             .build());
         HttpRequestData defaultRequest = HttpRequestData.get(baseUrl + "/delay").build();
         HttpRequestData overrideRequest = HttpRequestData.get(baseUrl + "/delay")
@@ -233,6 +237,121 @@ class HttpClientsTest {
 
         assertEquals(HttpErrorType.TIMEOUT, firstTimeout.getErrorType());
         assertEquals(HttpErrorType.TIMEOUT, nextTimeout.getErrorType());
+    }
+
+    @Test
+    void requestConfigKeepsConnectionAndResponseTimeoutsSeparate() {
+        RequestConfig requestConfig = HttpClients.createRequestConfig(
+            Duration.ofMillis(125),
+            Duration.ofMillis(875));
+
+        assertEquals(125, requestConfig.getConnectionRequestTimeout().toMilliseconds());
+        assertEquals(875, requestConfig.getResponseTimeout().toMilliseconds());
+    }
+
+    @Test
+    void connectionManagerUsesConfiguredCapacityLimits() {
+        HttpConnectionPoolConfig poolConfig = HttpConnectionPoolConfig.builder()
+            .maxTotalConnections(7)
+            .maxConnectionsPerRoute(3)
+            .connectionTimeToLive(Duration.ofMinutes(2))
+            .validateAfterInactivity(Duration.ofSeconds(2))
+            .idleEvictionTimeout(Duration.ofSeconds(20))
+            .build();
+        HttpClientConfig config = HttpClientConfig.builder()
+            .connectionPoolConfig(poolConfig)
+            .build();
+
+        try (PoolingHttpClientConnectionManager manager = HttpClients.createConnectionManager(config)) {
+            assertEquals(7, manager.getMaxTotal());
+            assertEquals(3, manager.getDefaultMaxPerRoute());
+        }
+    }
+
+    @Test
+    void strictRouteLimitMakesWaitingRequestUseConnectTimeout() throws Exception {
+        HttpConnectionPoolConfig poolConfig = HttpConnectionPoolConfig.builder()
+            .maxTotalConnections(1)
+            .maxConnectionsPerRoute(1)
+            .build();
+        HttpClients.configure(HttpClientConfig.builder()
+            .connectTimeout(Duration.ofMillis(150))
+            .responseTimeout(Duration.ofSeconds(2))
+            .connectionPoolConfig(poolConfig)
+            .build());
+        CompletableFuture<HttpResponseData> activeRequest = CompletableFuture.supplyAsync(
+            () -> HttpClients.get(baseUrl + "/blocking"));
+        assertTrue(blockingRequestStarted.await(2, TimeUnit.SECONDS));
+
+        try {
+            HttpClientException exception = assertThrows(
+                HttpClientException.class,
+                () -> HttpClients.execute(HttpRequestData.get(baseUrl + "/echo")
+                    .timeout(Duration.ofSeconds(1))
+                    .build()));
+
+            assertEquals(HttpErrorType.TIMEOUT, exception.getErrorType());
+            assertEquals(1, remotePorts.size());
+        } finally {
+            releaseBlockingRequest.countDown();
+        }
+        assertEquals("解除阻塞", activeRequest.get(2, TimeUnit.SECONDS).bodyAsString());
+    }
+
+    @Test
+    void expiredConnectionIsNotReused() throws Exception {
+        HttpConnectionPoolConfig poolConfig = HttpConnectionPoolConfig.builder()
+            .connectionTimeToLive(Duration.ofMillis(100))
+            .validateAfterInactivity(Duration.ofMillis(50))
+            .idleEvictionTimeout(Duration.ofSeconds(10))
+            .build();
+        HttpClients.configure(HttpClientConfig.builder()
+            .connectionPoolConfig(poolConfig)
+            .build());
+
+        HttpClients.get(baseUrl + "/echo");
+        int firstPort = remotePorts.iterator().next();
+        Thread.sleep(200);
+        HttpClients.get(baseUrl + "/echo");
+
+        assertEquals(2, remotePorts.size());
+        assertTrue(remotePorts.stream().anyMatch(port -> port != firstPort));
+    }
+
+    @Test
+    void idleConnectionIsEvictedAndNotReused() throws Exception {
+        HttpConnectionPoolConfig poolConfig = HttpConnectionPoolConfig.builder()
+            .connectionTimeToLive(Duration.ofMinutes(1))
+            .validateAfterInactivity(Duration.ofMillis(50))
+            .idleEvictionTimeout(Duration.ofMillis(100))
+            .build();
+        HttpClients.configure(HttpClientConfig.builder()
+            .connectionPoolConfig(poolConfig)
+            .build());
+
+        HttpClients.get(baseUrl + "/echo");
+        int firstPort = remotePorts.iterator().next();
+        Thread.sleep(1_500);
+        HttpClients.get(baseUrl + "/echo");
+        int secondPort = remotePorts.stream().filter(port -> port != firstPort).findFirst().orElse(firstPort);
+
+        assertEquals(2, remotePorts.size());
+        assertNotEquals(firstPort, secondPort);
+    }
+
+    @Test
+    void reconfigurationAndShutdownDoNotLeakIdleConnectionEvictor() throws Exception {
+        assertTrue(awaitIdleConnectionEvictorCount(1, Duration.ofSeconds(2)));
+
+        HttpClients.configure(HttpClientConfig.builder()
+            .connectionPoolConfig(HttpConnectionPoolConfig.builder()
+                .idleEvictionTimeout(Duration.ofSeconds(1))
+                .build())
+            .build());
+
+        assertTrue(awaitIdleConnectionEvictorCount(1, Duration.ofSeconds(2)));
+        HttpClients.shutdown();
+        assertTrue(awaitIdleConnectionEvictorCount(0, Duration.ofSeconds(2)));
     }
 
     @Test
@@ -255,7 +374,7 @@ class HttpClientsTest {
         assertThrows(
             IllegalArgumentException.class,
             () -> HttpClients.configure(HttpClientConfig.builder()
-                .requestTimeout(Duration.ZERO)
+                .responseTimeout(Duration.ZERO)
                 .build()));
 
         assertEquals(200, HttpClients.get(baseUrl + "/echo").statusCode());
@@ -270,7 +389,7 @@ class HttpClientsTest {
         CompletableFuture<Void> reconfiguration = CompletableFuture.runAsync(
             () -> HttpClients.configure(HttpClientConfig.builder()
                 .connectTimeout(Duration.ofSeconds(1))
-                .requestTimeout(Duration.ofSeconds(2))
+                .responseTimeout(Duration.ofSeconds(2))
                 .build()));
 
         assertThrows(TimeoutException.class, () -> reconfiguration.get(100, TimeUnit.MILLISECONDS));
@@ -301,6 +420,22 @@ class HttpClientsTest {
         exchange.sendResponseHeaders(status, bytes.length);
         exchange.getResponseBody().write(bytes);
         exchange.close();
+    }
+
+    private boolean awaitIdleConnectionEvictorCount(int expectedCount, Duration timeout)
+        throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        do {
+            long count = Thread.getAllStackTraces().keySet().stream()
+                .filter(Thread::isAlive)
+                .filter(thread -> thread.getName().startsWith("idle-connection-evictor"))
+                .count();
+            if (count == expectedCount) {
+                return true;
+            }
+            Thread.sleep(20);
+        } while (System.nanoTime() < deadline);
+        return false;
     }
 
     /**
