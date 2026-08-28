@@ -76,7 +76,7 @@ public final class JacksonUtils {
      *
      * @return 已完成初始化配置的 {@link ObjectMapper}
      */
-    private static ObjectMapper buildObjectMapper() {
+    public static ObjectMapper buildObjectMapper() {
         ObjectMapper mapper = new ObjectMapper();
         mapper.setDefaultPropertyInclusion(JsonInclude.Include.NON_NULL);
         mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
