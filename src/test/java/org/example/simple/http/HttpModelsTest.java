@@ -64,8 +64,9 @@ class HttpModelsTest {
     void clientConfigUsesSafeDefaultsAndValidatesTimeouts() {
         HttpClientConfig defaults = HttpClientConfig.defaults();
 
-        assertEquals(Duration.ofSeconds(5), defaults.connectTimeout());
-        assertEquals(Duration.ofSeconds(5), defaults.requestTimeout());
+        assertEquals(Duration.ofSeconds(3), defaults.connectTimeout());
+        assertEquals(Duration.ofSeconds(3), defaults.responseTimeout());
+        assertEquals(HttpConnectionPoolConfig.defaults(), defaults.connectionPoolConfig());
         assertFalse(defaults.skipSslVerification());
         assertTrue(defaults.objectMapper() instanceof ObjectMapper);
         assertThrows(
@@ -79,13 +80,75 @@ class HttpModelsTest {
             () -> HttpClientConfig.builder().connectTimeout(Duration.ZERO).build());
         assertThrows(
             IllegalArgumentException.class,
-            () -> HttpClientConfig.builder().requestTimeout(Duration.ofNanos(1)).build());
+            () -> HttpClientConfig.builder().responseTimeout(Duration.ofNanos(1)).build());
         assertThrows(
             IllegalArgumentException.class,
             () -> HttpClientConfig.builder().connectTimeout(Duration.ofSeconds(-1)).build());
         assertThrows(
             IllegalArgumentException.class,
-            () -> HttpClientConfig.builder().requestTimeout(Duration.ofSeconds(Long.MAX_VALUE)).build());
+            () -> HttpClientConfig.builder().responseTimeout(Duration.ofSeconds(Long.MAX_VALUE)).build());
+    }
+
+    @Test
+    void connectionPoolConfigUsesProductionDefaultsAndValidatesValues() {
+        HttpConnectionPoolConfig defaults = HttpConnectionPoolConfig.defaults();
+
+        assertEquals(200, defaults.maxTotalConnections());
+        assertEquals(50, defaults.maxConnectionsPerRoute());
+        assertEquals(Duration.ofMinutes(5), defaults.connectionTimeToLive());
+        assertEquals(Duration.ofSeconds(5), defaults.validateAfterInactivity());
+        assertEquals(Duration.ofSeconds(30), defaults.idleEvictionTimeout());
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> HttpConnectionPoolConfig.builder().maxTotalConnections(0).build());
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> HttpConnectionPoolConfig.builder().maxConnectionsPerRoute(-1).build());
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> HttpConnectionPoolConfig.builder()
+                .maxTotalConnections(1)
+                .maxConnectionsPerRoute(2)
+                .build());
+        assertThrows(
+            NullPointerException.class,
+            () -> HttpConnectionPoolConfig.builder().connectionTimeToLive(null).build());
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> HttpConnectionPoolConfig.builder().validateAfterInactivity(Duration.ZERO).build());
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> HttpConnectionPoolConfig.builder().idleEvictionTimeout(Duration.ofNanos(1)).build());
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> HttpConnectionPoolConfig.builder()
+                .connectionTimeToLive(Duration.ofSeconds(Long.MAX_VALUE))
+                .build());
+    }
+
+    @Test
+    void clientConfigKeepsCustomPoolAndSupportsCompatibilityConstructor() {
+        HttpConnectionPoolConfig customPool = HttpConnectionPoolConfig.builder()
+            .maxTotalConnections(20)
+            .maxConnectionsPerRoute(10)
+            .connectionTimeToLive(Duration.ofMinutes(1))
+            .validateAfterInactivity(Duration.ofSeconds(2))
+            .idleEvictionTimeout(Duration.ofSeconds(15))
+            .build();
+        HttpClientConfig custom = HttpClientConfig.builder()
+            .connectionPoolConfig(customPool)
+            .build();
+        HttpClientConfig compatible = new HttpClientConfig(
+            Duration.ofSeconds(1),
+            Duration.ofSeconds(2),
+            false,
+            new ObjectMapper());
+
+        assertEquals(customPool, custom.connectionPoolConfig());
+        assertEquals(HttpConnectionPoolConfig.defaults(), compatible.connectionPoolConfig());
+        assertThrows(
+            NullPointerException.class,
+            () -> HttpClientConfig.builder().connectionPoolConfig(null).build());
     }
 
     @Test

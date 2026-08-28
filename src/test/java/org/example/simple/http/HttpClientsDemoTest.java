@@ -1,13 +1,18 @@
 package org.example.simple.http;
 
-import org.junit.jupiter.api.Test;
-
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
-public class HttpClientsDemoTest {
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
+
+/**
+ * 依赖本地外部服务的 HTTP 手工调用示例。
+ */
+@Disabled("需要本地启动 127.0.0.1:54100 服务后手动运行")
+class HttpClientsDemoTest {
 
     @Test
     void testHttpGet() {
@@ -25,7 +30,10 @@ public class HttpClientsDemoTest {
         body.put("key1", "value1");
         body.put("key2", "value2");
         body.put("key3", LocalDateTime.now());
-        HttpRequestData hrd = HttpRequestData.post(url).timeout(Duration.ofSeconds(10)).body(new JsonRequestBody(body)).build();
+        HttpRequestData hrd = HttpRequestData.post(url)
+            .timeout(Duration.ofSeconds(10))
+            .body(new JsonRequestBody(body))
+            .build();
         System.out.println(HttpClients.execute(hrd).bodyAsString());
     }
 
