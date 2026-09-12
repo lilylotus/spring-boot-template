@@ -33,6 +33,15 @@ function bizTypeLabel(bizType: string): string {
   return labels[bizType] ?? bizType
 }
 
+function approvalUserName(bizType: string, bizId: string): string {
+  if (bizType !== 'USER_CREATE' && bizType !== 'USER_EDIT') {
+    return bizId
+  }
+
+  const user = users.value.find((item) => String(item.id) === bizId)
+  return user?.realName?.trim() || bizId
+}
+
 function actionLabel(action: ApprovalAction): string {
   return action === 'AGREE' ? '同意' : '驳回'
 }
@@ -142,8 +151,10 @@ loadUsersForDisplay()
             <el-table-column label="业务类型" width="120">
               <template #default="{ row }">{{ bizTypeLabel(row.bizType) }}</template>
             </el-table-column>
-            <el-table-column prop="bizId" label="业务标识" min-width="150" show-overflow-tooltip>
-              <template #default="{ row }"><code class="biz-id">{{ row.bizId }}</code></template>
+            <el-table-column label="审批用户" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">
+                {{ approvalUserName(row.bizType, row.bizId) }}
+              </template>
             </el-table-column>
             <el-table-column prop="level" label="级别" width="88">
               <template #default="{ row }">第 {{ row.level }} 级</template>
@@ -170,8 +181,10 @@ loadUsersForDisplay()
             <el-table-column label="业务类型" width="120">
               <template #default="{ row }">{{ bizTypeLabel(row.bizType) }}</template>
             </el-table-column>
-            <el-table-column prop="bizId" label="业务标识" min-width="150" show-overflow-tooltip>
-              <template #default="{ row }"><code class="biz-id">{{ row.bizId }}</code></template>
+            <el-table-column label="审批用户" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">
+                {{ approvalUserName(row.bizType, row.bizId) }}
+              </template>
             </el-table-column>
             <el-table-column prop="level" label="级别" width="88">
               <template #default="{ row }">第 {{ row.level }} 级</template>
@@ -279,12 +292,6 @@ loadUsersForDisplay()
 .approval-tabs :deep(.el-tabs__item) {
   height: 52px;
   font-weight: 500;
-}
-
-.biz-id {
-  color: var(--el-text-color-regular);
-  font-family: Consolas, 'SFMono-Regular', monospace;
-  font-size: 13px;
 }
 
 @media (max-width: 700px) {
