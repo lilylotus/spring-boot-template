@@ -13,8 +13,10 @@ import org.springframework.util.StringUtils;
 import com.example.template.approval.config.constant.ApprovalControlledBizType;
 import com.example.template.approval.config.dto.ApprovalChainLevelItem;
 import com.example.template.approval.config.entity.ApprovalChainConfig;
+import com.example.template.approval.config.entity.ApprovalProcessTemplate;
 import com.example.template.approval.config.entity.ApprovalSwitch;
 import com.example.template.approval.config.mapper.ApprovalChainConfigMapper;
+import com.example.template.approval.config.mapper.ApprovalProcessTemplateMapper;
 import com.example.template.approval.config.mapper.ApprovalSwitchMapper;
 import com.example.template.approval.config.service.ApprovalConfigService;
 import com.example.template.common.BusinessException;
@@ -28,6 +30,7 @@ public class ApprovalConfigServiceImpl implements ApprovalConfigService {
 
     private final ApprovalSwitchMapper approvalSwitchMapper;
     private final ApprovalChainConfigMapper approvalChainConfigMapper;
+    private final ApprovalProcessTemplateMapper approvalProcessTemplateMapper;
 
     /**
      * 查询全局审批开关状态。
@@ -123,6 +126,21 @@ public class ApprovalConfigServiceImpl implements ApprovalConfigService {
 
     private void validateRequiredChains() {
         for (ApprovalControlledBizType bizType : ApprovalControlledBizType.values()) {
+            long configuredTemplateCount = approvalProcessTemplateMapper.selectCount(
+                    Wrappers.<ApprovalProcessTemplate>lambdaQuery()
+                            .eq(ApprovalProcessTemplate::getBizType, bizType.name())
+                            .eq(ApprovalProcessTemplate::getScopeKey,
+                                    ApprovalProcessTemplateServiceImpl.GLOBAL_SCOPE));
+            boolean hasPublishedTemplate = approvalProcessTemplateMapper.selectCount(
+                    Wrappers.<ApprovalProcessTemplate>lambdaQuery()
+                            .eq(ApprovalProcessTemplate::getBizType, bizType.name())
+                            .eq(ApprovalProcessTemplate::getScopeKey,
+                                    ApprovalProcessTemplateServiceImpl.GLOBAL_SCOPE)
+                            .isNotNull(ApprovalProcessTemplate::getActiveVersionId)) > 0;
+            // 兼容升级前仅配置审批链的数据；一旦创建模板，就必须发布后才能开启。
+            if (configuredTemplateCount > 0 && !hasPublishedTemplate) {
+                throw new BusinessException("无法开启审批流程：" + bizType.getDisplayName() + "流程尚未发布");
+            }
             List<ApprovalChainConfig> chain = listChain(bizType.name());
             if (chain.isEmpty()) {
                 throw new BusinessException("无法开启审批流程：" + bizType.getDisplayName() + "审批链未配置");

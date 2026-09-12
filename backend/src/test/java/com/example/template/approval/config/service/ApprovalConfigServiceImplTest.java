@@ -12,6 +12,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.example.template.approval.config.entity.ApprovalChainConfig;
 import com.example.template.approval.config.entity.ApprovalSwitch;
 import com.example.template.approval.config.mapper.ApprovalChainConfigMapper;
+import com.example.template.approval.config.mapper.ApprovalProcessTemplateMapper;
 import com.example.template.approval.config.mapper.ApprovalSwitchMapper;
 import com.example.template.approval.config.service.impl.ApprovalConfigServiceImpl;
 import com.example.template.common.BusinessException;
@@ -20,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -36,11 +38,16 @@ class ApprovalConfigServiceImplTest {
     @Mock
     private ApprovalChainConfigMapper approvalChainConfigMapper;
 
+    @Mock
+    private ApprovalProcessTemplateMapper approvalProcessTemplateMapper;
+
     private ApprovalConfigServiceImpl approvalConfigService;
 
     @BeforeEach
     void setUp() {
-        approvalConfigService = new ApprovalConfigServiceImpl(approvalSwitchMapper, approvalChainConfigMapper);
+        lenient().when(approvalProcessTemplateMapper.selectCount(any())).thenReturn(1L);
+        approvalConfigService = new ApprovalConfigServiceImpl(
+                approvalSwitchMapper, approvalChainConfigMapper, approvalProcessTemplateMapper);
     }
 
     @Test

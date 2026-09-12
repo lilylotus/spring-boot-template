@@ -24,13 +24,21 @@ import com.example.template.approval.api.dto.ApprovalInstanceView;
 import com.example.template.approval.api.dto.ApprovalStatus;
 import com.example.template.approval.api.dto.StartApprovalCommand;
 import com.example.template.approval.config.entity.ApprovalChainConfig;
+import com.example.template.approval.config.dto.ProcessTemplateDraftSaveRequest;
+import com.example.template.approval.config.dto.ProcessTemplateVO;
+import com.example.template.approval.config.entity.ApprovalProcessTemplate;
+import com.example.template.approval.config.entity.ApprovalProcessTemplateVersion;
 import com.example.template.approval.config.mapper.ApprovalChainConfigMapper;
+import com.example.template.approval.config.mapper.ApprovalProcessTemplateMapper;
+import com.example.template.approval.config.mapper.ApprovalProcessTemplateVersionMapper;
+import com.example.template.approval.config.service.ApprovalProcessTemplateService;
 import com.example.template.approval.link.service.ApprovalBizLinkService;
 import com.example.template.approval.link.entity.ApprovalBizLink;
 import com.example.template.approval.link.mapper.ApprovalBizLinkMapper;
 import com.example.template.approval.record.entity.ApprovalActionRecord;
 import com.example.template.approval.record.mapper.ApprovalActionRecordMapper;
 import com.example.template.approval.record.service.ApprovalActionRecordService;
+import com.example.template.common.BusinessException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -49,6 +57,15 @@ class FlowableApprovalGatewayIntegrationTest {
 
     @Autowired
     private ApprovalChainConfigMapper approvalChainConfigMapper;
+
+    @Autowired
+    private ApprovalProcessTemplateService processTemplateService;
+
+    @Autowired
+    private ApprovalProcessTemplateMapper processTemplateMapper;
+
+    @Autowired
+    private ApprovalProcessTemplateVersionMapper processTemplateVersionMapper;
 
     @Autowired
     private ApprovalBizLinkService approvalBizLinkService;
@@ -87,13 +104,22 @@ class FlowableApprovalGatewayIntegrationTest {
                     Wrappers.<ApprovalChainConfig>lambdaQuery().eq(ApprovalChainConfig::getBizType, bizType));
             approvalBizLinkMapper.delete(
                     Wrappers.<ApprovalBizLink>lambdaQuery().eq(ApprovalBizLink::getBizType, bizType));
+            List<ApprovalProcessTemplate> templates = processTemplateMapper.selectList(
+                    Wrappers.<ApprovalProcessTemplate>lambdaQuery()
+                            .eq(ApprovalProcessTemplate::getBizType, bizType));
+            for (ApprovalProcessTemplate template : templates) {
+                processTemplateVersionMapper.delete(
+                        Wrappers.<ApprovalProcessTemplateVersion>lambdaQuery()
+                                .eq(ApprovalProcessTemplateVersion::getTemplateId, template.getId()));
+                processTemplateMapper.deleteById(template.getId());
+            }
         }
     }
 
     @Test
     void threeLevelChain_allLevelsAgree_completesEveryInstanceAndApproves() {
         bizType = "IT_OK_" + randomSuffix();
-        saveChain(bizType, List.of("alice", "bob", "carol"));
+        saveAndPublishChain(bizType, List.of("alice", "bob", "carol"));
         String bizId = "biz-" + UUID.randomUUID();
 
         ApprovalInstanceView started = gateway.start(new StartApprovalCommand(bizType, bizId, "operator", "{}"));
@@ -109,6 +135,12 @@ class FlowableApprovalGatewayIntegrationTest {
         assertThat(link.getInitiatorUserId()).isEqualTo("operator");
         assertThat(link.getApproverSnapshot()).isEqualTo("[\"alice\",\"bob\",\"carol\"]");
         assertThat(link.getPayloadSnapshot()).isEqualTo("{}");
+        assertThat(link.getBusinessKey()).isEqualTo(bizType + ":" + bizId);
+        assertThat(link.getProcessInstanceId()).isEqualTo(processInstanceId);
+        assertThat(link.getTemplateId()).isNotNull();
+        assertThat(link.getTemplateVersionId()).isNotNull();
+        assertThat(link.getTemplateVersionNo()).isEqualTo(1);
+        assertThat(link.getProcessDefinitionId()).isNotBlank();
         assertThat(gateway.listPendingTasks("alice"))
                 .filteredOn(task -> task.bizId().equals(bizId))
                 .singleElement()
@@ -128,6 +160,8 @@ class FlowableApprovalGatewayIntegrationTest {
         assertThat(pendingDetail.submittedTime()).isNotNull();
         assertThat(pendingDetail.payloadSnapshot()).isEqualTo("{}");
         assertThat(pendingDetail.payloadAvailable()).isTrue();
+        assertThat(pendingDetail.templateName()).isEqualTo(bizType + "审批流程");
+        assertThat(pendingDetail.templateVersionNo()).isEqualTo(1);
         assertThat(pendingDetail.nodes()).extracting(node -> node.approverUserId())
                 .containsExactly("alice", "bob", "carol");
         assertThat(pendingDetail.nodes()).extracting(node -> node.status())
@@ -175,7 +209,7 @@ class FlowableApprovalGatewayIntegrationTest {
     @Test
     void threeLevelChain_firstLevelReject_completesOnlyFirstInstanceAndRejects() {
         bizType = "IT_FIRST_NO_" + randomSuffix();
-        saveChain(bizType, List.of("alice", "bob", "carol"));
+        saveAndPublishChain(bizType, List.of("alice", "bob", "carol"));
         String bizId = "biz-" + UUID.randomUUID();
 
         gateway.start(new StartApprovalCommand(bizType, bizId, "operator", "{}"));
@@ -200,7 +234,7 @@ class FlowableApprovalGatewayIntegrationTest {
     @Test
     void threeLevelChain_middleLevelReject_completesTwoInstancesWithoutCreatingThird() {
         bizType = "IT_MIDDLE_NO_" + randomSuffix();
-        saveChain(bizType, List.of("alice", "bob", "carol"));
+        saveAndPublishChain(bizType, List.of("alice", "bob", "carol"));
         String bizId = "biz-" + UUID.randomUUID();
 
         gateway.start(new StartApprovalCommand(bizType, bizId, "operator", "{}"));
@@ -227,7 +261,7 @@ class FlowableApprovalGatewayIntegrationTest {
     @Test
     void legacyLinkWithoutSnapshots_recoversDetailFromFlowableHistory() {
         bizType = "IT_LEGACY_" + randomSuffix();
-        saveChain(bizType, List.of("alice"));
+        saveAndPublishChain(bizType, List.of("alice"));
         String bizId = "biz-" + UUID.randomUUID();
         gateway.start(new StartApprovalCommand(bizType, bizId, "legacy-initiator", "{\"legacy\":true}"));
         ApprovalBizLink link = approvalBizLinkService.findLatestByBizKey(bizType, bizId).orElseThrow();
@@ -285,7 +319,7 @@ class FlowableApprovalGatewayIntegrationTest {
     @Test
     void actByNonApprover_doesNotCreateRecord() {
         bizType = "IT_AUTH_" + randomSuffix();
-        saveChain(bizType, List.of("alice"));
+        saveAndPublishChain(bizType, List.of("alice"));
         String bizId = "biz-" + UUID.randomUUID();
         gateway.start(new StartApprovalCommand(bizType, bizId, "operator", "{}"));
 
@@ -300,9 +334,62 @@ class FlowableApprovalGatewayIntegrationTest {
     }
 
     @Test
+    void startWithoutPublishedTemplate_isRejectedEvenWhenLegacyChainExists() {
+        bizType = "IT_UNPUBLISHED_" + randomSuffix();
+        saveChain(bizType, List.of("alice"));
+
+        assertThatThrownBy(() -> gateway.start(new StartApprovalCommand(
+                bizType, "biz-" + UUID.randomUUID(), "operator", "{}")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("业务动作[" + bizType + "]尚未发布审批流程");
+    }
+
+    @Test
+    void publishingV2_keepsRunningV1AndAuditsEachInstanceVersion() {
+        bizType = "IT_VERSION_" + randomSuffix();
+        saveAndPublishChain(bizType, List.of("alice"));
+        String v1BizId = "biz-v1-" + UUID.randomUUID();
+        gateway.start(new StartApprovalCommand(bizType, v1BizId, "operator", "{}"));
+        ApprovalBizLink v1Link = approvalBizLinkService.findLatestByBizKey(bizType, v1BizId).orElseThrow();
+
+        ProcessTemplateVO current = processTemplateService.getTemplate(bizType, "GLOBAL");
+        current.nodes().stream()
+                .filter(node -> "APPROVAL".equals(node.getType()))
+                .forEach(node -> node.setApproverUserId("bob"));
+        ProcessTemplateDraftSaveRequest request = new ProcessTemplateDraftSaveRequest();
+        request.setExpectedDraftRevision(current.draftRevision());
+        request.setNodes(current.nodes());
+        request.setEdges(current.edges());
+        ProcessTemplateVO saved = processTemplateService.saveDraft(bizType, "GLOBAL", request);
+        assertThatThrownBy(() -> processTemplateService.saveDraft(bizType, "GLOBAL", request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("流程草稿已被其他会话修改，请重新加载");
+        processTemplateService.publish(bizType, "GLOBAL", saved.draftRevision());
+        assertThat(processTemplateService.listVersions(bizType, "GLOBAL"))
+                .extracting(version -> version.versionNo())
+                .containsExactly(2, 1);
+        assertThat(processTemplateService.listVersions(bizType, "GLOBAL").get(0).active()).isTrue();
+
+        String v2BizId = "biz-v2-" + UUID.randomUUID();
+        gateway.start(new StartApprovalCommand(bizType, v2BizId, "operator", "{}"));
+        ApprovalBizLink v2Link = approvalBizLinkService.findLatestByBizKey(bizType, v2BizId).orElseThrow();
+
+        assertThat(v1Link.getTemplateVersionNo()).isEqualTo(1);
+        assertThat(v2Link.getTemplateVersionNo()).isEqualTo(2);
+        assertThat(v1Link.getProcessDefinitionId()).isNotEqualTo(v2Link.getProcessDefinitionId());
+        assertThat(gateway.listPendingTasks("alice")).extracting(task -> task.bizId()).contains(v1BizId);
+        assertThat(gateway.listPendingTasks("bob")).extracting(task -> task.bizId()).contains(v2BizId);
+        assertThat(gateway.getApprovalDetail(v1Link.getId(), "alice").templateVersionNo()).isEqualTo(1);
+        assertThat(gateway.getApprovalDetail(v2Link.getId(), "bob").templateVersionNo()).isEqualTo(2);
+
+        gateway.act(new ApprovalActCommand(bizType, v1BizId, "alice", ApprovalAction.AGREE, "v1同意"));
+        gateway.act(new ApprovalActCommand(bizType, v2BizId, "bob", ApprovalAction.AGREE, "v2同意"));
+    }
+
+    @Test
     void flowableCompletionFailure_rollsBackInsertedRecordAndLeavesTaskPending() {
         bizType = "IT_ROLLBACK_" + randomSuffix();
-        saveChain(bizType, List.of("alice"));
+        saveAndPublishChain(bizType, List.of("alice"));
         String bizId = "biz-" + UUID.randomUUID();
         gateway.start(new StartApprovalCommand(bizType, bizId, "operator", "{}"));
 
@@ -433,5 +520,16 @@ class FlowableApprovalGatewayIntegrationTest {
             entity.setUpdatedTime(now);
             approvalChainConfigMapper.insert(entity);
         }
+    }
+
+    private void saveAndPublishChain(String bizType, List<String> approvers) {
+        saveChain(bizType, approvers);
+        ProcessTemplateVO initial = processTemplateService.getTemplate(bizType, "GLOBAL");
+        ProcessTemplateDraftSaveRequest request = new ProcessTemplateDraftSaveRequest();
+        request.setExpectedDraftRevision(initial.draftRevision());
+        request.setNodes(initial.nodes());
+        request.setEdges(initial.edges());
+        ProcessTemplateVO saved = processTemplateService.saveDraft(bizType, "GLOBAL", request);
+        processTemplateService.publish(bizType, "GLOBAL", saved.draftRevision());
     }
 }

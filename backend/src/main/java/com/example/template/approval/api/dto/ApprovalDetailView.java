@@ -27,5 +27,7 @@ public record ApprovalDetailView(
         LocalDateTime submittedTime,
         String payloadSnapshot,
         boolean payloadAvailable,
-        List<ApprovalNodeView> nodes) {
+        List<ApprovalNodeView> nodes,
+        String templateName,
+        Integer templateVersionNo) {
 }

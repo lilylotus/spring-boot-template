@@ -4,6 +4,8 @@ import type {
   ApprovalChainLevel,
   ApprovalChainSaveRequest,
   ApprovalSwitch,
+  ProcessTemplate,
+  ProcessTemplateDraftSaveRequest,
 } from '../types/approval-config'
 
 /** 查询全局审批开关。 */
@@ -28,4 +30,24 @@ export function saveApprovalChain(
 ): Promise<void> {
   const request: ApprovalChainSaveRequest = { levels }
   return http.put<void>(`/api/approval/chains/${bizType}`, request)
+}
+
+export function getProcessTemplate(bizType: ApprovalBizType): Promise<ProcessTemplate> {
+  return http.get<ProcessTemplate>(`/api/approval/templates/${bizType}`)
+}
+
+export function saveProcessTemplateDraft(
+  bizType: ApprovalBizType,
+  request: ProcessTemplateDraftSaveRequest,
+): Promise<ProcessTemplate> {
+  return http.put<ProcessTemplate>(`/api/approval/templates/${bizType}/draft`, request)
+}
+
+export function publishProcessTemplate(
+  bizType: ApprovalBizType,
+  expectedDraftRevision: number,
+): Promise<ProcessTemplate> {
+  return http.post<ProcessTemplate>(`/api/approval/templates/${bizType}/publish`, {
+    expectedDraftRevision,
+  })
 }

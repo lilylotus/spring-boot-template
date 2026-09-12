@@ -9,7 +9,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import lombok.RequiredArgsConstructor;
 import org.flowable.engine.HistoryService;
 import org.flowable.engine.RuntimeService;
@@ -31,8 +30,8 @@ import com.example.template.approval.api.dto.ApprovalRecordView;
 import com.example.template.approval.api.dto.ApprovalStatus;
 import com.example.template.approval.api.dto.ApprovalTaskView;
 import com.example.template.approval.api.dto.StartApprovalCommand;
-import com.example.template.approval.config.entity.ApprovalChainConfig;
-import com.example.template.approval.config.mapper.ApprovalChainConfigMapper;
+import com.example.template.approval.config.dto.PublishedProcessTemplate;
+import com.example.template.approval.config.service.PublishedProcessResolver;
 import com.example.template.approval.link.entity.ApprovalBizLink;
 import com.example.template.approval.link.service.ApprovalBizLinkService;
 import com.example.template.approval.record.entity.ApprovalActionRecord;
@@ -49,28 +48,21 @@ import com.example.template.util.JacksonUtils;
 @RequiredArgsConstructor
 public class FlowableApprovalGateway implements ApprovalGateway {
 
-    private static final String PROCESS_DEFINITION_KEY = "sequentialDesignatedUserApproval";
+    private static final String GLOBAL_SCOPE = "GLOBAL";
 
     private final RuntimeService runtimeService;
     private final TaskService taskService;
     private final HistoryService historyService;
-    private final ApprovalChainConfigMapper approvalChainConfigMapper;
+    private final PublishedProcessResolver publishedProcessResolver;
     private final ApprovalBizLinkService approvalBizLinkService;
     private final ApprovalActionRecordService approvalActionRecordService;
 
     @Override
     @Transactional
     public ApprovalInstanceView start(StartApprovalCommand command) {
-        List<ApprovalChainConfig> chain = approvalChainConfigMapper.selectList(
-                Wrappers.<ApprovalChainConfig>lambdaQuery()
-                        .eq(ApprovalChainConfig::getBizType, command.bizType())
-                        .orderByAsc(ApprovalChainConfig::getLevelNo));
-        if (chain.isEmpty()) {
-            throw new BusinessException("业务动作[" + command.bizType() + "]尚未配置审批链，无法发起审批");
-        }
-        List<String> approverList = chain.stream()
-                .map(ApprovalChainConfig::getApproverUserId)
-                .collect(Collectors.toList());
+        PublishedProcessTemplate template = publishedProcessResolver.resolve(
+                command.bizType(), GLOBAL_SCOPE);
+        List<String> approverList = template.approverUserIds();
 
         Map<String, Object> variables = new HashMap<>();
         variables.put("approverList", approverList);
@@ -79,13 +71,20 @@ public class FlowableApprovalGateway implements ApprovalGateway {
         variables.put("initiatorUserId", command.initiatorUserId());
         variables.put("payloadSnapshot", command.payloadSnapshot());
 
-        ProcessInstance processInstance = runtimeService.startProcessInstanceByKey(
-                PROCESS_DEFINITION_KEY, command.bizType() + ":" + command.bizId(), variables);
+        String businessKey = command.bizType() + ":" + command.bizId();
+        ProcessInstance processInstance = runtimeService.startProcessInstanceById(
+                template.processDefinitionId(), businessKey, variables);
 
         ApprovalBizLink link = new ApprovalBizLink();
         link.setBizType(command.bizType());
         link.setBizId(command.bizId());
         link.setProcessInstanceId(processInstance.getId());
+        link.setBusinessKey(businessKey);
+        link.setTemplateId(template.templateId());
+        link.setTemplateName(template.templateName());
+        link.setTemplateVersionId(template.templateVersionId());
+        link.setTemplateVersionNo(template.versionNo());
+        link.setProcessDefinitionId(template.processDefinitionId());
         link.setStatus(ApprovalStatus.PENDING.name());
         link.setInitiatorUserId(command.initiatorUserId());
         link.setApproverSnapshot(JacksonUtils.toJson(approverList));
@@ -222,7 +221,9 @@ public class FlowableApprovalGateway implements ApprovalGateway {
                 link.getCreatedTime(),
                 payloadSnapshot,
                 payloadSnapshot != null,
-                nodes);
+                nodes,
+                link.getTemplateName(),
+                link.getTemplateVersionNo());
     }
 
     private ApprovalRecordView toApprovalRecordView(ApprovalActionRecord record) {

@@ -19,7 +19,14 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.example.template.approval.api.ApprovalGateway;
 import com.example.template.approval.api.dto.StartApprovalCommand;
 import com.example.template.approval.config.entity.ApprovalChainConfig;
+import com.example.template.approval.config.dto.ProcessTemplateDraftSaveRequest;
+import com.example.template.approval.config.dto.ProcessTemplateVO;
+import com.example.template.approval.config.entity.ApprovalProcessTemplate;
+import com.example.template.approval.config.entity.ApprovalProcessTemplateVersion;
 import com.example.template.approval.config.mapper.ApprovalChainConfigMapper;
+import com.example.template.approval.config.mapper.ApprovalProcessTemplateMapper;
+import com.example.template.approval.config.mapper.ApprovalProcessTemplateVersionMapper;
+import com.example.template.approval.config.service.ApprovalProcessTemplateService;
 import com.example.template.approval.engine.flowable.SpringContextHolder;
 import com.example.template.approval.link.service.ApprovalBizLinkService;
 import com.example.template.approval.record.entity.ApprovalActionRecord;
@@ -52,6 +59,15 @@ class ApprovalTaskControllerTest {
     private ApprovalChainConfigMapper approvalChainConfigMapper;
 
     @Autowired
+    private ApprovalProcessTemplateService processTemplateService;
+
+    @Autowired
+    private ApprovalProcessTemplateMapper processTemplateMapper;
+
+    @Autowired
+    private ApprovalProcessTemplateVersionMapper processTemplateVersionMapper;
+
+    @Autowired
     private ApprovalActionRecordMapper approvalActionRecordMapper;
 
     @Autowired
@@ -79,13 +95,22 @@ class ApprovalTaskControllerTest {
                     Wrappers.<ApprovalActionRecord>lambdaQuery().eq(ApprovalActionRecord::getBizType, bizType));
             approvalChainConfigMapper.delete(
                     Wrappers.<ApprovalChainConfig>lambdaQuery().eq(ApprovalChainConfig::getBizType, bizType));
+            List<ApprovalProcessTemplate> templates = processTemplateMapper.selectList(
+                    Wrappers.<ApprovalProcessTemplate>lambdaQuery()
+                            .eq(ApprovalProcessTemplate::getBizType, bizType));
+            for (ApprovalProcessTemplate template : templates) {
+                processTemplateVersionMapper.delete(
+                        Wrappers.<ApprovalProcessTemplateVersion>lambdaQuery()
+                                .eq(ApprovalProcessTemplateVersion::getTemplateId, template.getId()));
+                processTemplateMapper.deleteById(template.getId());
+            }
         }
     }
 
     @Test
     void listPendingTasks_thenAgreeTwice_flowsToApproved() throws Exception {
         bizType = "TASK_CTRL_" + randomSuffix();
-        saveChain(bizType, List.of("alice", "bob"));
+        saveAndPublishChain(bizType, List.of("alice", "bob"));
         String bizId = "biz-" + UUID.randomUUID();
 
         approvalGateway.start(new StartApprovalCommand(bizType, bizId, "operator", "{}"));
@@ -165,7 +190,7 @@ class ApprovalTaskControllerTest {
     @Test
     void act_reject_stopsProcessImmediately() throws Exception {
         bizType = "TASK_CTRL_" + randomSuffix();
-        saveChain(bizType, List.of("alice", "bob"));
+        saveAndPublishChain(bizType, List.of("alice", "bob"));
         String bizId = "biz-" + UUID.randomUUID();
 
         approvalGateway.start(new StartApprovalCommand(bizType, bizId, "operator", "{}"));
@@ -190,7 +215,7 @@ class ApprovalTaskControllerTest {
     @Test
     void listPendingTasks_withoutUserIdHeader_fallsBackToDefaultOperator() throws Exception {
         bizType = "TASK_CTRL_" + randomSuffix();
-        saveChain(bizType, List.of(DefaultOperator.ID, "bob"));
+        saveAndPublishChain(bizType, List.of(DefaultOperator.ID, "bob"));
         String bizId = "biz-" + UUID.randomUUID();
 
         approvalGateway.start(new StartApprovalCommand(bizType, bizId, "operator", "{}"));
@@ -238,5 +263,16 @@ class ApprovalTaskControllerTest {
             entity.setUpdatedTime(now);
             approvalChainConfigMapper.insert(entity);
         }
+    }
+
+    private void saveAndPublishChain(String bizType, List<String> approvers) {
+        saveChain(bizType, approvers);
+        ProcessTemplateVO initial = processTemplateService.getTemplate(bizType, "GLOBAL");
+        ProcessTemplateDraftSaveRequest request = new ProcessTemplateDraftSaveRequest();
+        request.setExpectedDraftRevision(initial.draftRevision());
+        request.setNodes(initial.nodes());
+        request.setEdges(initial.edges());
+        ProcessTemplateVO saved = processTemplateService.saveDraft(bizType, "GLOBAL", request);
+        processTemplateService.publish(bizType, "GLOBAL", saved.draftRevision());
     }
 }

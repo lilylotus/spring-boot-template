@@ -227,6 +227,8 @@ watch(
             <div><dt>业务标识</dt><dd><code>{{ detail.bizId }}</code></dd></div>
             <div><dt>发起人</dt><dd>{{ userLabel(detail.initiatorUserId) }}</dd></div>
             <div><dt>发起时间</dt><dd>{{ detail.submittedTime || '历史数据不可用' }}</dd></div>
+            <div><dt>流程模板</dt><dd>{{ detail.templateName || '历史数据不可用' }}</dd></div>
+            <div><dt>模板版本</dt><dd>{{ detail.templateVersionNo ? `v${detail.templateVersionNo}` : '历史数据不可用' }}</dd></div>
           </dl>
         </section>
 

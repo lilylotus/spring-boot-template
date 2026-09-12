@@ -16,3 +16,37 @@ export interface ApprovalChainLevel {
 export interface ApprovalChainSaveRequest {
   levels: ApprovalChainLevel[]
 }
+
+export type ProcessNodeType = 'START' | 'APPROVAL' | 'END'
+
+export interface ProcessDesignNode {
+  id: string
+  type: ProcessNodeType
+  x: number
+  y: number
+  approverUserId?: string
+}
+
+export interface ProcessDesignEdge {
+  id: string
+  sourceNodeId: string
+  targetNodeId: string
+}
+
+export interface ProcessTemplate {
+  templateId?: number | null
+  bizType: ApprovalBizType
+  scope: 'GLOBAL'
+  name: string
+  draftRevision: number
+  activeVersionNo?: number | null
+  persisted: boolean
+  nodes: ProcessDesignNode[]
+  edges: ProcessDesignEdge[]
+}
+
+export interface ProcessTemplateDraftSaveRequest {
+  expectedDraftRevision: number
+  nodes: ProcessDesignNode[]
+  edges: ProcessDesignEdge[]
+}

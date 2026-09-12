@@ -2,6 +2,7 @@
 frontend/node_modules/**
 .gradle-user-home/**
 backend/.gradle-user-home/**
+backend/.gradle-user/**
 
 *.jar
 

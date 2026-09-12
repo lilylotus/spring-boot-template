@@ -66,6 +66,8 @@ export interface ApprovalDetail {
   submittedTime?: string | null
   payloadSnapshot?: string | null
   payloadAvailable: boolean
+  templateName?: string | null
+  templateVersionNo?: number | null
   nodes: ApprovalNode[]
 }
 

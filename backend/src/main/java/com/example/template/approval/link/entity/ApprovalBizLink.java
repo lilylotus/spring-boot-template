@@ -24,6 +24,18 @@ public class ApprovalBizLink {
 
     private String processInstanceId;
 
+    private String businessKey;
+
+    private Long templateId;
+
+    private String templateName;
+
+    private Long templateVersionId;
+
+    private Integer templateVersionNo;
+
+    private String processDefinitionId;
+
     /** PENDING / APPROVED / REJECTED，取值见 {@link com.example.template.approval.api.dto.ApprovalStatus}。 */
     private String status;
 
