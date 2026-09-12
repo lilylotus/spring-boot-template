@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:flowable="http://flowable.org/bpmn"
+             typeLanguage="http://www.w3.org/2001/XMLSchema"
+             expressionLanguage="http://www.w3.org/1999/XPath"
+             targetNamespace="http://com.example.template/approval">
+
+    <!--
+        用一份流程定义支撑“可配置的多级指定用户顺序审批”：
+        - 通过顺序多实例（isSequential=true）用户任务实现逐级顺序审批，级数由启动流程时传入的
+          approverList 集合唯一决定，不再声明额外的实例数量表达式。
+        - Flowable 把集合当前元素绑定到 currentApprover，用户任务直接使用该变量作为审批人。
+        - completionCondition 实现“任一级驳回立即终止”：approvalAction == 'REJECT' 时短路退出循环，
+          不再创建后续级别的任务；否则等待全部实例完成（nrOfCompletedInstances == nrOfInstances）。
+        - 用单个 EndEvent + 流程变量表达最终结果（通过/驳回），不使用额外的 ExclusiveGateway 分叉
+          （design.md D4 中列出的可选简化方案）。
+    -->
+    <process id="sequentialDesignatedUserApproval" name="顺序指定用户审批" isExecutable="true">
+
+        <startEvent id="startEvent" name="发起审批"/>
+
+        <sequenceFlow id="flowToApprovalTask" sourceRef="startEvent" targetRef="approvalTask"/>
+
+        <userTask id="approvalTask" name="审批" flowable:assignee="${currentApprover}">
+            <extensionElements>
+                <flowable:taskListener event="complete"
+                                        class="com.example.template.approval.engine.flowable.listener.ApprovalActionTaskListener"/>
+            </extensionElements>
+            <multiInstanceLoopCharacteristics isSequential="true"
+                                               flowable:collection="approverList"
+                                               flowable:elementVariable="currentApprover">
+                <completionCondition>${approvalAction == 'REJECT' || nrOfCompletedInstances == nrOfInstances}</completionCondition>
+            </multiInstanceLoopCharacteristics>
+        </userTask>
+
+        <sequenceFlow id="flowToEndEvent" sourceRef="approvalTask" targetRef="endEvent"/>
+
+        <endEvent id="endEvent" name="审批结束">
+            <extensionElements>
+                <flowable:executionListener event="end"
+                                             class="com.example.template.approval.engine.flowable.listener.ApprovalResultExecutionListener"/>
+            </extensionElements>
+        </endEvent>
+
+    </process>
+</definitions>
