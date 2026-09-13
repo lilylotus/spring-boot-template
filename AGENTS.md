@@ -14,7 +14,7 @@
 
 ## 编码风格与命名
 
-Java 使用 4 空格缩进，包名全小写，类型使用 `PascalCase`，方法和字段使用 `camelCase`；Controller、Service、Mapper、Entity、DTO 按现有分层放置。Vue 单文件组件使用 `<script setup lang="ts">`、2 空格缩进、无分号；组件文件使用 `PascalCase.vue`，组合式函数使用 `useXxx.ts`。Flyway 文件遵循 `V<序号>__<说明>.sql`。仓库未配置独立格式化或 lint 命令，提交前应保持邻近代码风格。
+Java 使用 4 空格缩进，包名全小写，类型使用 `PascalCase`，方法和字段使用 `camelCase`；Controller、Service、Mapper、Entity、DTO 按现有分层放置。所有 Java 类、接口、枚举、记录和注解类型都必须在声明上方添加 JavaDoc，说明该类型的职责、适用边界和主要协作对象。所有 Spring Boot/Java 方法（包括 `public`、`protected`、包级和 `private` 方法）也必须添加 JavaDoc，简要说明方法的作用、关键参数、返回值及可能抛出的业务异常；重写方法不能只依赖 `@Override` 表达用途。复杂实现必须在事务边界、状态转换、补偿处理、算法步骤或不直观分支附近添加行内注释，说明“为什么这样做”，不要逐行复述代码。修改缺少说明的既有类型或方法时，应在同一次变更中补齐注释。Vue 单文件组件使用 `<script setup lang="ts">`、2 空格缩进、无分号；组件文件使用 `PascalCase.vue`，组合式函数使用 `useXxx.ts`。Flyway 文件遵循 `V<序号>__<说明>.sql`。仓库未配置独立格式化或 lint 命令，提交前应保持邻近代码风格。
 
 ## 测试指南
 
