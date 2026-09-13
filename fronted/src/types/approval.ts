@@ -9,6 +9,9 @@ export type ApprovalNodeStatus = 'APPROVED' | 'REJECTED' | 'PENDING' | 'WAITING'
 
 /** 当前操作人的一条待审批任务。 */
 export interface ApprovalTask {
+  groupId?: number | null
+  groupName?: string | null
+  confirmOnly?: boolean
   /** 稳定的审批实例标识。 */
   approvalId: number
   bizType: string
@@ -45,6 +48,10 @@ export interface ApprovalActRequest {
 
 /** 审批详情中的一个流程节点。 */
 export interface ApprovalNode {
+  groupId?: number | null
+  groupName?: string | null
+  currentMemberIds?: string[]
+  memberActions?: { userId: string; action: ApprovalAction; comment?: string; actedTime: string; groupName?: string }[]
   level: number
   approverUserId: string
   status: ApprovalNodeStatus

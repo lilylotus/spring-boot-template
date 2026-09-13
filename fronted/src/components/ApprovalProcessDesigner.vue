@@ -13,6 +13,8 @@ import type {
   ProcessTemplate,
 } from '../types/approval-config'
 import type { UserVO } from '../types/user'
+import { listUserGroups } from '../api/user-group'
+import type { UserGroup } from '../api/user-group'
 
 const props = defineProps<{
   bizType: ApprovalBizType
@@ -25,6 +27,8 @@ const emit = defineEmits<{
 }>()
 
 const canvasRef = ref<HTMLElement>()
+const groups = ref<UserGroup[]>([])
+const groupsFailed = ref(false)
 const template = ref<ProcessTemplate | null>(null)
 const nodes = ref<ProcessDesignNode[]>([])
 const edges = ref<ProcessDesignEdge[]>([])
@@ -69,6 +73,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
+    await refreshGroups()
     applyTemplate(await getProcessTemplate(props.bizType))
   } catch {
     error.value = '流程模板加载失败，请重试。'
@@ -148,6 +153,27 @@ function userLabel(userId?: string): string {
   return user ? `${user.realName}（${user.username}）` : `用户 ID ${userId}（已失效）`
 }
 
+async function refreshGroups() {
+  try {
+    groups.value = await listUserGroups()
+    groupsFailed.value = false
+  } catch {
+    groupsFailed.value = true
+  }
+}
+
+function changeAssigneeType() {
+  if (!selectedNode.value) return
+  delete selectedNode.value.approverUserId
+  delete selectedNode.value.approverGroupId
+}
+
+function assignmentLabel(node: ProcessDesignNode): string {
+  if (node.assigneeType !== 'GROUP') return userLabel(node.approverUserId)
+  const group = groups.value.find(item => item.id === node.approverGroupId)
+  return group ? group.name + '（有效 ' + group.activeMemberIds.length + ' 人）' : '请选择有效用户组'
+}
+
 function nodeTitle(node: ProcessDesignNode): string {
   if (node.type === 'START') return '开始'
   if (node.type === 'END') return '结束'
@@ -190,10 +216,14 @@ function validateGraph(): string[] {
   const approvals = nodes.value.filter((node) => node.type === 'APPROVAL')
   if (starts.length !== 1 || ends.length !== 1) problems.push('必须且只能有一个开始和结束节点')
   if (approvals.length === 0) problems.push('至少添加一个审批节点')
-  if (approvals.some((node) => !node.approverUserId)) problems.push('所有审批节点都必须选择审批人')
+  if (approvals.some((node) => node.assigneeType !== 'GROUP' && !node.approverUserId)) problems.push('个人节点必须选择审批人')
   const activeUserIds = new Set(activeUsers.value.map((user) => String(user.id)))
-  if (approvals.some((node) => node.approverUserId && !activeUserIds.has(node.approverUserId))) {
+  if (approvals.some((node) => node.assigneeType !== 'GROUP' && node.approverUserId && !activeUserIds.has(node.approverUserId))) {
     problems.push('存在已失效的审批人，请重新选择')
+  }
+  if (approvals.some(node => node.assigneeType === 'GROUP' && (groupsFailed.value
+      || !groups.value.some(group => group.id === node.approverGroupId && group.activeMemberIds.length > 0)))) {
+    problems.push('用户组不存在、停用、无有效成员或加载失败，请刷新用户组')
   }
   const incoming = new Map<string, number>()
   const outgoing = new Map<string, number>()
@@ -248,6 +278,7 @@ async function publish() {
     ElMessage.warning('请先保存当前草稿')
     return
   }
+  await refreshGroups()
   if (validationErrors.value.length > 0) {
     ElMessage.warning(validationErrors.value[0])
     return
@@ -297,6 +328,7 @@ onBeforeUnmount(() => window.removeEventListener('pointermove', handlePointerMov
         </p>
       </div>
       <div class="designer-actions">
+        <el-button @click="refreshGroups">刷新用户组</el-button>
         <el-tag v-if="isDirty" type="warning">未保存</el-tag>
         <el-button :disabled="loading" @click="addApprovalNode">添加审批节点</el-button>
         <el-button :loading="saving" :disabled="loading || !isDirty" @click="saveDraft">
@@ -348,7 +380,7 @@ onBeforeUnmount(() => window.removeEventListener('pointermove', handlePointerMov
               @click.stop="finishConnection(node)"
             />
             <strong>{{ nodeTitle(node) }}</strong>
-            <span>{{ node.type === 'APPROVAL' ? userLabel(node.approverUserId) : nodeTitle(node) }}</span>
+            <span>{{ node.type === 'APPROVAL' ? assignmentLabel(node) : nodeTitle(node) }}</span>
             <button
               v-if="node.type !== 'END'"
               class="port port--output"
@@ -366,6 +398,18 @@ onBeforeUnmount(() => window.removeEventListener('pointermove', handlePointerMov
         <template v-if="selectedNode">
           <p class="node-type">{{ nodeTitle(selectedNode) }} · {{ selectedNode.id }}</p>
           <template v-if="selectedNode.type === 'APPROVAL'">
+            <label>审批方式</label>
+            <el-select v-model="selectedNode.assigneeType" placeholder="指定用户" @change="changeAssigneeType">
+              <el-option label="指定用户" value="USER" />
+              <el-option label="用户组（任一成员同意）" value="GROUP" />
+            </el-select>
+            <template v-if="selectedNode.assigneeType === 'GROUP'">
+              <el-select v-model="selectedNode.approverGroupId" filterable placeholder="选择用户组">
+                <el-option v-for="group in groups" :key="group.id" :label="group.name + '（' + group.activeMemberIds.length + '人）'" :value="group.id" :disabled="!group.activeMemberIds.length" />
+              </el-select>
+              <p>审批时使用组内最新有效成员，任一人同意即通过，全部当前成员驳回才终止。</p>
+            </template>
+            <template v-else>
             <label>审批人</label>
             <el-select v-model="selectedNode.approverUserId" filterable placeholder="选择有效用户">
               <el-option
@@ -381,6 +425,7 @@ onBeforeUnmount(() => window.removeEventListener('pointermove', handlePointerMov
                 :value="String(user.id)"
               />
             </el-select>
+            </template>
             <el-button type="danger" plain @click="removeNode(selectedNode)">删除审批节点</el-button>
           </template>
           <p v-else>开始和结束节点不可删除，可拖动调整布局。</p>

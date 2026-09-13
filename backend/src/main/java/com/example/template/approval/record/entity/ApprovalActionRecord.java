@@ -26,6 +26,8 @@ public class ApprovalActionRecord {
     private String taskId;
 
     private String approverUserId;
+    private Long groupId;
+    private String groupName;
 
     private Integer levelNo;
 

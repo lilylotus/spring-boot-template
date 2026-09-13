@@ -25,6 +25,8 @@ export interface ProcessDesignNode {
   x: number
   y: number
   approverUserId?: string
+  assigneeType?: 'USER' | 'GROUP'
+  approverGroupId?: number
 }
 
 export interface ProcessDesignEdge {

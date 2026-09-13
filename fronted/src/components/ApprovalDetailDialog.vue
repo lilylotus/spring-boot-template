@@ -280,7 +280,7 @@ watch(
         <section class="detail-section">
           <div class="section-heading">
             <h3>完整审批流程</h3>
-            <span>审批链以本次发起时的快照为准</span>
+            <span>流程按发起版本展示，用户组成员实时读取，历史动作永久保留</span>
           </div>
 
           <el-empty v-if="detail.nodes.length === 0" :image-size="64" description="历史流程节点不可用" />
@@ -295,7 +295,7 @@ watch(
               <div class="process-node__content">
                 <div class="process-node__topline">
                   <div>
-                    <strong>第 {{ node.level }} 级 · {{ userLabel(node.approverUserId) }}</strong>
+                    <strong>第 {{ node.level }} 级 · {{ node.groupId ? '用户组：' + node.groupName : userLabel(node.approverUserId) }}</strong>
                     <span v-if="node.taskTitle">{{ node.taskTitle }}</span>
                   </div>
                   <el-tag
@@ -304,6 +304,13 @@ watch(
                   >{{ nodeStatusLabel(node.status) }}</el-tag>
                 </div>
                 <div v-if="node.status === 'PENDING'" class="current-point">当前审批点</div>
+                <template v-if="node.groupId">
+                  <p>当前有效成员：{{ node.currentMemberIds?.map(id => userLabel(id)).join('、') || '暂无（节点不可处理）' }}</p>
+                  <p v-for="vote in node.memberActions" :key="vote.userId">
+                    {{ userLabel(vote.userId) }} · {{ actionLabel(vote.action) }} · {{ vote.comment || '无意见' }} · {{ vote.actedTime }}
+                    <span v-if="vote.groupName">（处理时用户组：{{ vote.groupName }}）</span>
+                  </p>
+                </template>
                 <dl class="node-meta">
                   <div v-if="node.action"><dt>审批动作</dt><dd>{{ actionLabel(node.action) }}</dd></div>
                   <div v-if="node.comment"><dt>审批意见</dt><dd>{{ node.comment }}</dd></div>

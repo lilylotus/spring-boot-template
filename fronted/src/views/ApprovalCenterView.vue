@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { listApprovalRecords, listPendingApprovalTasks } from '../api/approval'
 import { listUsers } from '../api/user'
 import ApprovalActionDialog from '../components/ApprovalActionDialog.vue'
@@ -22,6 +22,22 @@ const users = ref<UserVO[]>([])
 const detailDialogVisible = ref(false)
 const selectedApprovalId = ref<number | null>(null)
 let requestSequence = 0
+let refreshTimer: ReturnType<typeof setInterval> | undefined
+
+function refreshWhenIdle() {
+  if (!document.hidden && !actionDialogVisible.value && !detailDialogVisible.value
+      && !pendingLoading.value && !recordsLoading.value) loadApprovalData()
+}
+
+onMounted(() => {
+  refreshTimer = setInterval(refreshWhenIdle, 5000)
+  window.addEventListener('focus', refreshWhenIdle)
+})
+onBeforeUnmount(() => {
+  clearInterval(refreshTimer)
+  window.removeEventListener('focus', refreshWhenIdle)
+  requestSequence++
+})
 
 const pendingTabLabel = computed(() => `待我审批 ${pendingTasks.value.length}`)
 
@@ -110,6 +126,21 @@ function handleActionSubmitted() {
   loadApprovalData()
 }
 
+async function handleActionFailed() {
+  // 失败可能源于实时成员变化或其他成员已处理；不要继续保留失效的操作入口。
+  const previousTask = selectedTask.value
+  await loadApprovalData()
+  const latest = pendingTasks.value.find(task => task.approvalId === previousTask?.approvalId
+    && task.level === previousTask?.level)
+  if (!latest) {
+    actionDialogVisible.value = false
+    selectedTask.value = null
+  } else {
+    selectedTask.value = latest
+    if (latest.confirmOnly) selectedAction.value = 'REJECT'
+  }
+}
+
 watch(
   () => operator.value.id,
   () => {
@@ -164,8 +195,8 @@ loadUsersForDisplay()
             <el-table-column label="操作" width="180" fixed="right">
               <template #default="{ row }">
                 <el-button link @click="openDetail(row.approvalId)">详情</el-button>
-                <el-button type="success" link @click="openActionDialog(row, 'AGREE')">同意</el-button>
-                <el-button type="danger" link @click="openActionDialog(row, 'REJECT')">驳回</el-button>
+                <el-button v-if="!row.confirmOnly" type="success" link @click="openActionDialog(row, 'AGREE')">同意</el-button>
+                <el-button type="danger" link @click="openActionDialog(row, 'REJECT')">{{ row.confirmOnly ? '确认驳回结果' : '驳回' }}</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -217,6 +248,7 @@ loadUsersForDisplay()
       :task="selectedTask"
       :action="selectedAction"
       @submitted="handleActionSubmitted"
+      @failed="handleActionFailed"
     />
     <ApprovalDetailDialog
       v-model="detailDialogVisible"

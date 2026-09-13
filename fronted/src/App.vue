@@ -8,6 +8,7 @@ import OperatorSwitcher from './components/OperatorSwitcher.vue'
     <el-header class="app-shell__header">
       <nav class="app-nav" aria-label="主要导航">
         <router-link class="app-nav__link" to="/users">用户管理</router-link>
+        <router-link class="app-nav__link" to="/user-groups">用户组管理</router-link>
         <router-link class="app-nav__link" to="/approvals">审批中心</router-link>
         <router-link class="app-nav__link" to="/approval-settings">审批配置</router-link>
       </nav>

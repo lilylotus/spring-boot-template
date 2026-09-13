@@ -33,7 +33,10 @@ import com.example.template.approval.config.service.ApprovalConfigService;
 import com.example.template.approval.config.service.ApprovalProcessTemplateService;
 import com.example.template.common.BusinessException;
 import com.example.template.util.JacksonUtils;
+import com.example.template.usergroup.service.UserGroupService;
+import com.example.template.approval.config.design.GroupAssignment;
 
+/** 管理草稿、发布版本及业务映射，通过发布适配器部署并校验实时组可用性。 */
 @Service
 @RequiredArgsConstructor
 public class ApprovalProcessTemplateServiceImpl implements ApprovalProcessTemplateService {
@@ -47,7 +50,9 @@ public class ApprovalProcessTemplateServiceImpl implements ApprovalProcessTempla
     private final ProcessBpmnGenerator bpmnGenerator;
     private final ProcessDefinitionPublisher publisher;
     private final TransactionTemplate transactionTemplate;
+    private final UserGroupService userGroupService;
 
+    /** 查询业务模板草稿，未持久化时从旧链构建初始画布。 */
     @Override
     public ProcessTemplateVO getTemplate(String bizType, String scope) {
         validateKey(bizType, scope);
@@ -58,6 +63,7 @@ public class ApprovalProcessTemplateServiceImpl implements ApprovalProcessTempla
         return toView(template, bizType, scope, template.getName(), parseModel(template.getDraftModelJson()), true);
     }
 
+    /** 按修订号保存草稿，冲突时拒绝覆盖其他编辑者的内容。 */
     @Override
     @Transactional
     public ProcessTemplateVO saveDraft(String bizType, String scope, ProcessTemplateDraftSaveRequest request) {
@@ -97,6 +103,7 @@ public class ApprovalProcessTemplateServiceImpl implements ApprovalProcessTempla
         return getTemplate(bizType, scope);
     }
 
+    /** 校验并发布流程版本，持久化失败时补偿删除新部署。 */
     @Override
     public ProcessTemplateVO publish(String bizType, String scope, long expectedDraftRevision) {
         validateKey(bizType, scope);
@@ -106,6 +113,7 @@ public class ApprovalProcessTemplateServiceImpl implements ApprovalProcessTempla
         }
         ProcessDesignModel model = parseModel(template.getDraftModelJson());
         List<String> approvers = validator.validateAndResolveApprovers(model);
+        validateGroups(approvers);
         String processKey = "approvalTemplate_" + template.getId();
         String bpmnXml = bpmnGenerator.generate(processKey, template.getName());
         ProcessDefinitionPublisher.PublishedDefinition deployed = publisher.deploy(
@@ -155,6 +163,7 @@ public class ApprovalProcessTemplateServiceImpl implements ApprovalProcessTempla
         return getTemplate(bizType, scope);
     }
 
+    /** 按业务映射解析当前版本，启动前验证用户组仍可用。 */
     @Override
     public PublishedProcessTemplate resolve(String bizType, String scope) {
         validateKey(bizType, scope);
@@ -171,10 +180,12 @@ public class ApprovalProcessTemplateServiceImpl implements ApprovalProcessTempla
             throw new BusinessException("业务动作[" + bizType + "]的生效流程版本不存在");
         }
         List<String> approvers = validator.validateAndResolveApprovers(parseModel(version.getModelJson()));
+        validateGroups(approvers);
         return new PublishedProcessTemplate(template.getId(), version.getId(), version.getVersionNo(),
                 template.getName(), version.getProcessDefinitionId(), version.getProcessDefinitionKey(), approvers);
     }
 
+    /** 查询不可变发布历史，标识当前激活版本。 */
     @Override
     public List<ProcessTemplateVersionVO> listVersions(String bizType, String scope) {
         validateKey(bizType, scope);
@@ -193,18 +204,21 @@ public class ApprovalProcessTemplateServiceImpl implements ApprovalProcessTempla
                 .toList();
     }
 
+    /** 判断指定业务及作用域是否已经发布模板。 */
     @Override
     public boolean hasPublishedTemplate(String bizType, String scope) {
         ApprovalProcessTemplate template = findTemplate(bizType, scope);
         return template != null && template.getActiveVersionId() != null;
     }
 
+    /** 查询唯一业务映射模板。 */
     private ApprovalProcessTemplate findTemplate(String bizType, String scope) {
         return templateMapper.selectOne(Wrappers.<ApprovalProcessTemplate>lambdaQuery()
                 .eq(ApprovalProcessTemplate::getBizType, bizType)
                 .eq(ApprovalProcessTemplate::getScopeKey, scope));
     }
 
+    /** 为尚无模板的历史受控业务初始化并发布个人审批链。 */
     private synchronized void initializeLegacyTemplate(String bizType, String scope) {
         ApprovalProcessTemplate current = findTemplate(bizType, scope);
         if (current != null) {
@@ -228,6 +242,7 @@ public class ApprovalProcessTemplateServiceImpl implements ApprovalProcessTempla
         publish(bizType, scope, template.getDraftRevision());
     }
 
+    /** 组装模板、草稿及当前发布版本信息。 */
     private ProcessTemplateVO toView(ApprovalProcessTemplate template, String bizType, String scope,
                                      String name, ProcessDesignModel model, boolean persisted) {
         Integer activeVersion = null;
@@ -240,6 +255,7 @@ public class ApprovalProcessTemplateServiceImpl implements ApprovalProcessTempla
                 model.getNodes(), model.getEdges());
     }
 
+    /** 将旧顺序链转换为设计器初始节点及连线。 */
     private ProcessDesignModel buildLegacyModel(String bizType) {
         List<ApprovalChainConfig> chain = chainMapper.selectList(Wrappers.<ApprovalChainConfig>lambdaQuery()
                 .eq(ApprovalChainConfig::getBizType, bizType).orderByAsc(ApprovalChainConfig::getLevelNo));
@@ -264,18 +280,27 @@ public class ApprovalProcessTemplateServiceImpl implements ApprovalProcessTempla
         return model;
     }
 
+    /** 构造兼容旧链的节点，保留组引用类型。 */
     private ProcessDesignNode node(String id, String type, double x, double y, String approver) {
         ProcessDesignNode node = new ProcessDesignNode();
-        node.setId(id); node.setType(type); node.setX(x); node.setY(y); node.setApproverUserId(approver);
+        node.setId(id); node.setType(type); node.setX(x); node.setY(y);
+        if (GroupAssignment.isGroup(approver)) {
+            node.setAssigneeType("GROUP");
+            node.setApproverGroupId(GroupAssignment.id(approver));
+        } else {
+            node.setApproverUserId(approver);
+        }
         return node;
     }
 
+    /** 构造有向连线。 */
     private ProcessDesignEdge edge(String id, String source, String target) {
         ProcessDesignEdge edge = new ProcessDesignEdge();
         edge.setId(id); edge.setSourceNodeId(source); edge.setTargetNodeId(target);
         return edge;
     }
 
+    /** 解析持久化模型，损坏时报告业务异常。 */
     private ProcessDesignModel parseModel(String json) {
         try {
             return JacksonUtils.toObj(json, ProcessDesignModel.class);
@@ -284,6 +309,7 @@ public class ApprovalProcessTemplateServiceImpl implements ApprovalProcessTempla
         }
     }
 
+    /** 校验业务类型长度及当前支持的GLOBAL范围。 */
     private void validateKey(String bizType, String scope) {
         if (!StringUtils.hasText(bizType) || bizType.length() > 64) {
             throw new BusinessException("业务类型格式不正确");
@@ -293,6 +319,13 @@ public class ApprovalProcessTemplateServiceImpl implements ApprovalProcessTempla
         }
     }
 
+    /** 校验发布或发起时引用组可用，不保存有效成员集合。 */
+    private void validateGroups(List<String> assignments) {
+        assignments.stream().filter(GroupAssignment::isGroup)
+                .forEach(assignment -> userGroupService.requireAvailable(GroupAssignment.id(assignment)));
+    }
+
+    /** 生成默认业务流程名称。 */
     private String displayName(String bizType) {
         return switch (bizType) {
             case "USER_CREATE" -> "用户新增审批流程";

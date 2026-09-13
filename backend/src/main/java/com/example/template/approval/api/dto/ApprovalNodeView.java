@@ -22,5 +22,17 @@ public record ApprovalNodeView(
         ApprovalAction action,
         String comment,
         LocalDateTime taskCreatedTime,
-        LocalDateTime actedTime) {
+        LocalDateTime actedTime,
+        Long groupId,
+        String groupName,
+        java.util.List<String> currentMemberIds,
+        java.util.List<ApprovalMemberActionView> memberActions) {
+
+    /** 兼容个人节点和旧历史数据，无用户组附加信息。 */
+    public ApprovalNodeView(Integer level, String approverUserId, ApprovalNodeStatus status, String taskTitle,
+                            ApprovalAction action, String comment, LocalDateTime taskCreatedTime,
+                            LocalDateTime actedTime) {
+        this(level, approverUserId, status, taskTitle, action, comment, taskCreatedTime, actedTime,
+                null, null, java.util.List.of(), java.util.List.of());
+    }
 }

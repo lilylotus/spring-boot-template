@@ -26,6 +26,7 @@ import com.example.template.approval.config.publish.ProcessDefinitionPublisher;
 import com.example.template.approval.config.service.impl.ApprovalProcessTemplateServiceImpl;
 import com.example.template.common.BusinessException;
 import com.example.template.util.JacksonUtils;
+import com.example.template.usergroup.service.UserGroupService;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -34,6 +35,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+/** 模板发布事务、补偿和未发布草稿边界测试。 */
 @ExtendWith(MockitoExtension.class)
 class ApprovalProcessTemplateServiceImplTest {
 
@@ -44,16 +46,19 @@ class ApprovalProcessTemplateServiceImplTest {
     @Mock private ProcessDefinitionPublisher publisher;
     @Mock private TransactionTemplate transactionTemplate;
     @Mock private TransactionStatus transactionStatus;
+    @Mock private UserGroupService userGroupService;
 
     private ApprovalProcessTemplateServiceImpl service;
 
+    /** 构建隔离发布服务，避免单元测试实际部署引擎流程。 */
     @BeforeEach
     void setUp() {
         service = new ApprovalProcessTemplateServiceImpl(templateMapper, versionMapper, chainMapper,
                 approvalConfigService, new ProcessDesignValidator(), new ProcessBpmnGenerator(),
-                publisher, transactionTemplate);
+                publisher, transactionTemplate, userGroupService);
     }
 
+    /** 版本落库失败应补偿删除新部署，不留下无法追溯的流程定义。 */
     @Test
     void publish_whenVersionPersistenceFails_deletesNewDeployment() {
         ApprovalProcessTemplate template = template(false);
@@ -78,6 +83,7 @@ class ApprovalProcessTemplateServiceImplTest {
         verify(publisher).deleteDeployment("deployment-1");
     }
 
+    /** 业务解析不能自动发布用户尚未确认的持久化草稿。 */
     @Test
     void resolve_doesNotAutoPublishPersistedDraft() {
         when(templateMapper.selectOne(any())).thenReturn(template(false));
@@ -89,6 +95,7 @@ class ApprovalProcessTemplateServiceImplTest {
         verifyNoInteractions(publisher);
     }
 
+    /** 构建指定发布状态的模板夹具。 */
     private ApprovalProcessTemplate template(boolean active) {
         ApprovalProcessTemplate template = new ApprovalProcessTemplate();
         template.setId(7L);
@@ -103,6 +110,7 @@ class ApprovalProcessTemplateServiceImplTest {
         return template;
     }
 
+    /** 构建兼容旧格式的有效单人审批画布。 */
     private ProcessDesignModel validModel() {
         ProcessDesignNode start = node("start", "START", null);
         ProcessDesignNode approval = node("approval", "APPROVAL", "alice");
@@ -113,6 +121,7 @@ class ApprovalProcessTemplateServiceImplTest {
         return model;
     }
 
+    /** 创建指定标识、类型及个人指派的测试节点。 */
     private ProcessDesignNode node(String id, String type, String approver) {
         ProcessDesignNode node = new ProcessDesignNode();
         node.setId(id);
@@ -121,6 +130,7 @@ class ApprovalProcessTemplateServiceImplTest {
         return node;
     }
 
+    /** 创建连接两个测试节点的有向边。 */
     private ProcessDesignEdge edge(String source, String target) {
         ProcessDesignEdge edge = new ProcessDesignEdge();
         edge.setId(source + "-" + target);

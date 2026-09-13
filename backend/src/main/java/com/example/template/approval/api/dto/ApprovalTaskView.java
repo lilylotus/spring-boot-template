@@ -13,5 +13,10 @@ import java.time.LocalDateTime;
  * @param createdTime 任务创建时间
  */
 public record ApprovalTaskView(Long approvalId, String bizType, String bizId, Integer level, String taskTitle,
-                                LocalDateTime createdTime) {
+                                LocalDateTime createdTime, Long groupId, String groupName, boolean confirmOnly) {
+    /** 兼容现有指定用户待办，无组信息且不需要结算确认。 */
+    public ApprovalTaskView(Long approvalId, String bizType, String bizId, Integer level, String taskTitle,
+                            LocalDateTime createdTime) {
+        this(approvalId, bizType, bizId, level, taskTitle, createdTime, null, null, false);
+    }
 }

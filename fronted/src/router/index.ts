@@ -10,6 +10,11 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
+      path: '/user-groups',
+      name: 'user-groups',
+      component: () => import('../views/UserGroupView.vue'),
+    },
+    {
       path: '/',
       redirect: '/users',
     },

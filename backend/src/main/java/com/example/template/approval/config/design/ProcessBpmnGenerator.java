@@ -2,9 +2,11 @@ package com.example.template.approval.config.design;
 
 import org.springframework.stereotype.Component;
 
+/** 生成顺序审批BPMN；组节点在创建时转成共享候选任务，成员资格由网关实时校验。 */
 @Component
 public class ProcessBpmnGenerator {
 
+    /** 为模板生成可执行定义，沿用顺序节点编号及现有结果监听器。 */
     public String generate(String processKey, String processName) {
         String safeName = escapeXml(processName);
         return """
@@ -18,6 +20,7 @@ public class ProcessBpmnGenerator {
                     <sequenceFlow id="flowToApprovalTask" sourceRef="startEvent" targetRef="approvalTask"/>
                     <userTask id="approvalTask" name="审批" flowable:assignee="${currentApprover}">
                       <extensionElements>
+                        <flowable:taskListener event="create" class="com.example.template.approval.engine.flowable.listener.GroupTaskCreateListener"/>
                         <flowable:taskListener event="complete" class="com.example.template.approval.engine.flowable.listener.ApprovalActionTaskListener"/>
                       </extensionElements>
                       <multiInstanceLoopCharacteristics isSequential="true" flowable:collection="approverList" flowable:elementVariable="currentApprover">
@@ -35,6 +38,7 @@ public class ProcessBpmnGenerator {
                 """.formatted(processKey, safeName);
     }
 
+    /** 转义模板名称中的XML保留字符。 */
     private String escapeXml(String value) {
         return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 .replace("\"", "&quot;").replace("'", "&apos;");
