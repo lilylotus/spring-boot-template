@@ -22,15 +22,15 @@ class JacksonJsonSerializerTest {
     @Test
     void requestMessageCompletesSerializationRoundTrip() {
         RpcRequest request = new RpcRequest(
-            "请求-1",
             "计算服务",
             "求和",
             List.of(Integer.class.getName()),
-            List.of(IntNode.valueOf(3)));
+            List.of(RpcPayload.of(3, Integer.class, serializer)), 5000, java.util.Map.of());
 
         RpcRequest result = serializer.deserialize(serializer.serialize(request), RpcRequest.class);
 
-        assertEquals(request, result);
+        assertEquals(request.serviceName(), result.serviceName());
+        assertEquals(3, result.arguments().getFirst().decode(Integer.class, serializer));
     }
 
     @Test

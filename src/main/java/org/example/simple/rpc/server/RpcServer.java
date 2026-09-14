@@ -2,154 +2,158 @@ package org.example.simple.rpc.server;
 
 import java.net.InetSocketAddress;
 import java.util.Objects;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
-
+import java.util.concurrent.atomic.AtomicInteger;
 import io.netty.bootstrap.ServerBootstrap;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelOption;
-import io.netty.channel.EventLoopGroup;
-import io.netty.channel.MultiThreadIoEventLoopGroup;
+import io.netty.buffer.PooledByteBufAllocator;
+import io.netty.channel.*;
+import io.netty.channel.group.*;
 import io.netty.channel.nio.NioIoHandler;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.handler.ssl.SslContext;
+import org.example.simple.rpc.common.*;
+import org.example.simple.rpc.config.RpcConfig;
+import org.example.simple.rpc.transport.*;
+import org.example.simple.rpc.monitoring.RpcTelemetry;
 
-import org.example.simple.rpc.common.JacksonJsonSerializer;
-import org.example.simple.rpc.common.MessageSerializer;
-import org.example.simple.rpc.common.RpcMessageDecoder;
-import org.example.simple.rpc.common.RpcMessageEncoder;
-import org.example.simple.rpc.common.RpcProtocol;
-import org.example.simple.rpc.common.RpcRequest;
-import org.example.simple.rpc.common.RpcResponse;
-
-/**
- * 基于 Netty 的 JSON RPC 服务端。
- */
+/** 具有固定线程配置、有界准入与限时排空的 RPC 服务端。 */
 public final class RpcServer implements AutoCloseable {
-
-    private final MessageSerializer serializer;
-    private final RpcRequestDispatcher dispatcher;
-    private final int maxMessageLength;
-    private final EventLoopGroup bossGroup;
-    private final EventLoopGroup workerGroup;
-    private final ThreadPoolExecutor businessExecutor;
-    private final AtomicBoolean started = new AtomicBoolean();
-    private final AtomicBoolean closed = new AtomicBoolean();
-
-    private volatile Channel serverChannel;
-
-    /**
-     * 使用默认配置创建服务端。
-     *
-     * @param serviceRegistry 已完成服务注册的注册表
-     */
-    public RpcServer(ServiceRegistry serviceRegistry) {
-        this(
-            serviceRegistry,
-            new JacksonJsonSerializer(),
-            RpcProtocol.DEFAULT_MAX_MESSAGE_LENGTH,
-            Math.max(2, Runtime.getRuntime().availableProcessors()),
-            1024);
+    final ServiceRegistry registry;
+    final RpcConfig config;
+    final SerializerRegistry serializers;
+    final ThreadPoolExecutor codec;
+    final ThreadPoolExecutor business;
+    final Semaphore inflight;
+    final AtomicBoolean draining = new AtomicBoolean();
+    private final EventLoopGroup boss;
+    private final EventLoopGroup workers;
+    private final ChannelGroup channels;
+    final ByteBudget budget;
+    private final SslContext ssl;
+    private final RpcTelemetry.Resources resources;
+    private final AtomicInteger connections = new AtomicInteger();
+    private final ConcurrentMap<String, Bucket> rates = new ConcurrentHashMap<>();
+    private Channel listener;
+    private CompletableFuture<Void> closing;
+    private final java.util.List<AutoCloseable> registrations = new java.util.ArrayList<>();
+    public RpcServer(ServiceRegistry registry) { this(registry, RpcConfig.defaults()); }
+    public RpcServer(ServiceRegistry registry, RpcConfig config) {
+        this(registry, config, SerializerRegistry.defaults(), null);
     }
-
-    /**
-     * 使用指定配置创建服务端。
-     *
-     * @param serviceRegistry 服务注册表
-     * @param serializer 消息序列化器
-     * @param maxMessageLength 最大消息体字节数
-     * @param businessThreads 业务线程数
-     * @param businessQueueCapacity 业务等待队列容量
-     */
-    public RpcServer(
-        ServiceRegistry serviceRegistry,
-        MessageSerializer serializer,
-        int maxMessageLength,
-        int businessThreads,
-        int businessQueueCapacity) {
-        this.serializer = Objects.requireNonNull(serializer, "消息序列化器不能为空");
-        this.dispatcher = new RpcRequestDispatcher(serviceRegistry, serializer);
-        if (maxMessageLength <= 0 || businessThreads <= 0 || businessQueueCapacity <= 0) {
-            throw new IllegalArgumentException("消息长度、业务线程数和队列容量必须大于零");
-        }
-        this.maxMessageLength = maxMessageLength;
-        this.bossGroup = new MultiThreadIoEventLoopGroup(1, NioIoHandler.newFactory());
-        this.workerGroup = new MultiThreadIoEventLoopGroup(NioIoHandler.newFactory());
-        this.businessExecutor = new ThreadPoolExecutor(
-            businessThreads,
-            businessThreads,
-            0L,
-            TimeUnit.MILLISECONDS,
-            new ArrayBlockingQueue<>(businessQueueCapacity),
-            new ThreadPoolExecutor.AbortPolicy());
+    public RpcServer(ServiceRegistry registry, MessageSerializer serializer, int maxLength, int threads, int queue) {
+        this(registry, RpcConfig.builder().maxMessageLength(maxLength).businessThreads(threads)
+            .businessQueueCapacity(queue).build(), new SerializerRegistry(serializer), null);
     }
-
-    /**
-     * 启动服务端并监听指定地址。
-     *
-     * @param host 监听主机
-     * @param port 监听端口，传入 0 时由系统分配
-     * @throws InterruptedException 当前线程等待绑定时被中断
-     */
-    public void start(String host, int port) throws InterruptedException {
-        if (closed.get()) {
-            throw new IllegalStateException("RPC 服务端已关闭");
-        }
-        if (!started.compareAndSet(false, true)) {
-            throw new IllegalStateException("RPC 服务端已经启动");
-        }
+    public RpcServer(ServiceRegistry registry, RpcConfig config, SerializerRegistry serializers, SslContext ssl) {
+        this.registry = Objects.requireNonNull(registry); this.config = Objects.requireNonNull(config);
+        this.serializers = Objects.requireNonNull(serializers); this.ssl = ssl;
+        boss = new MultiThreadIoEventLoopGroup(config.serverBossThreads(), RpcExecutors.factory("boss"),
+            NioIoHandler.newFactory());
+        workers = new MultiThreadIoEventLoopGroup(config.serverWorkerThreads(), RpcExecutors.factory("worker"),
+            NioIoHandler.newFactory());
+        channels = new DefaultChannelGroup(workers.next());
+        codec = RpcExecutors.pool("server-codec", config.codecThreads(), config.codecQueueCapacity());
+        business = RpcExecutors.pool("business", config.businessThreads(), config.businessQueueCapacity());
+        inflight = new Semaphore(config.businessThreads() + config.businessQueueCapacity());
+        budget = new ByteBudget(config.maxBufferedBytes());
+        resources = RpcTelemetry.bind("server",
+            () -> config.businessThreads() + config.businessQueueCapacity() - inflight.availablePermits(),
+            connections::get, () -> codec.getQueue().size() + business.getQueue().size(), budget::used);
+    }
+    public synchronized void start(String host, int port) throws InterruptedException {
+        RpcExecutors.requireExternalThread();
+        if (listener != null || draining.get()) { throw new IllegalStateException("服务端已启动或关闭"); }
         try {
-            ServerBootstrap bootstrap = new ServerBootstrap()
-                .group(bossGroup, workerGroup)
-                .channel(NioServerSocketChannel.class)
+            listener = new ServerBootstrap().group(boss, workers).channel(NioServerSocketChannel.class)
+                .option(ChannelOption.SO_BACKLOG, config.backlog()).option(ChannelOption.SO_REUSEADDR, true)
+                .childOption(ChannelOption.TCP_NODELAY, true).childOption(ChannelOption.SO_KEEPALIVE, true)
+                .childOption(ChannelOption.ALLOCATOR, PooledByteBufAllocator.DEFAULT)
+                .childOption(ChannelOption.WRITE_BUFFER_WATER_MARK, config.waterMark())
+                .childOption(ChannelOption.AUTO_READ, true).childOption(ChannelOption.ALLOW_HALF_CLOSURE, false)
                 .childHandler(new ChannelInitializer<SocketChannel>() {
-                    @Override
-                    protected void initChannel(SocketChannel channel) {
-                        channel.pipeline()
-                            .addLast(new RpcMessageDecoder<>(RpcRequest.class, serializer, maxMessageLength))
-                            .addLast(new RpcMessageEncoder<>(RpcResponse.class, serializer, maxMessageLength))
-                            .addLast(new RpcServerHandler(dispatcher, businessExecutor));
+                    @Override protected void initChannel(SocketChannel channel) {
+                        if (draining.get()) { channel.close(); return; }
+                        if (connections.incrementAndGet() > config.maxServerConnections()) {
+                            connections.decrementAndGet(); channel.close(); return;
+                        }
+                        channels.add(channel);
+                        channel.closeFuture().addListener(done -> connections.decrementAndGet());
+                        RpcPipeline.install(channel, config, serializers, budget, ssl, null, 0,
+                            new RpcServerHandler(RpcServer.this));
                     }
-                })
-                .childOption(ChannelOption.TCP_NODELAY, true);
-            serverChannel = bootstrap.bind(host, port).sync().channel();
-        } catch (InterruptedException | RuntimeException exception) {
-            started.set(false);
-            close();
-            throw exception;
+                }).bind(host, port).sync().channel();
+        } catch (InterruptedException | RuntimeException error) { closeAsync(); throw error; }
+    }
+    /** 监听成功后注册服务，注册失败时回滚整个服务端。 */
+    public void startRegistered(String host, int port, String advertisedHost,
+                                org.example.simple.rpc.discovery.NacosServiceDiscovery discovery,
+                                String... services) throws InterruptedException {
+        start(host, port);
+        try {
+            synchronized (this) {
+                for (String service : services) {
+                    if (!registry.containsService(service)) { throw new IllegalArgumentException("服务尚未本地注册"); }
+                    registrations.add(discovery.register(service, new org.example.simple.rpc.discovery.ServiceInstance(
+                        advertisedHost + ":" + getPort(), advertisedHost, getPort(), 1)));
+                }
+            }
+        } catch (RuntimeException error) { closeAsync(); throw error; }
+    }
+    public synchronized int getPort() {
+        if (listener == null) { throw new IllegalStateException("服务端尚未启动"); }
+        return ((InetSocketAddress) listener.localAddress()).getPort();
+    }
+    public RpcConfig config() { return config; }
+    public long bufferedBytes() { return budget.used(); }
+    boolean rateAllowed(String service) {
+        if (!registry.containsService(service)) { return true; }
+        return rates.computeIfAbsent(service, key -> new Bucket()).allow();
+    }
+    private final class Bucket {
+        private double tokens = config.burstCapacity();
+        private long updated = System.nanoTime();
+        synchronized boolean allow() {
+            long now = System.nanoTime();
+            tokens = Math.min(config.burstCapacity(), tokens + (now - updated) / 1e9 * config.requestsPerSecond());
+            updated = now;
+            if (tokens < 1) { return false; }
+            tokens--; return true;
         }
     }
-
-    /**
-     * 获取服务端实际监听端口。
-     *
-     * @return 实际监听端口
-     */
-    public int getPort() {
-        Channel channel = serverChannel;
-        if (channel == null) {
-            throw new IllegalStateException("RPC 服务端尚未启动");
-        }
-        return ((InetSocketAddress) channel.localAddress()).getPort();
+    public synchronized CompletableFuture<Void> closeAsync() {
+        if (closing != null) { return closing; }
+        draining.set(true);
+        closing = new CompletableFuture<>();
+        RpcExecutors.factory("server-close").newThread(() -> {
+            try {
+                long drainDeadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(config.drainTimeoutMillis());
+                if (listener != null) { listener.close(); }
+                for (AutoCloseable registration : registrations) {
+                    FutureTask<Void> unregister = new FutureTask<>(() -> { registration.close(); return null; });
+                    RpcExecutors.factory("unregister").newThread(unregister).start();
+                    try { unregister.get(remaining(drainDeadline), TimeUnit.MILLISECONDS); }
+                    catch (Exception error) { unregister.cancel(true); }
+                }
+                codec.shutdown();
+                codec.awaitTermination(remaining(drainDeadline), TimeUnit.MILLISECONDS);
+                business.shutdown();
+                business.awaitTermination(remaining(drainDeadline), TimeUnit.MILLISECONDS);
+                long closeDeadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(config.shutdownTimeoutMillis());
+                channels.close().awaitUninterruptibly(remaining(closeDeadline));
+                RpcExecutors.stop(codec); RpcExecutors.stop(business);
+                boss.shutdownGracefully(0, remaining(closeDeadline), TimeUnit.MILLISECONDS);
+                workers.shutdownGracefully(0, remaining(closeDeadline), TimeUnit.MILLISECONDS)
+                    .awaitUninterruptibly(remaining(closeDeadline));
+                resources.close();
+                closing.complete(null);
+            } catch (Throwable error) { closing.completeExceptionally(error); }
+        }).start();
+        return closing;
     }
-
-    /**
-     * 幂等关闭监听通道、业务执行器和事件循环组。
-     */
-    @Override
-    public void close() {
-        if (!closed.compareAndSet(false, true)) {
-            return;
-        }
-        Channel channel = serverChannel;
-        if (channel != null) {
-            channel.close().syncUninterruptibly();
-        }
-        businessExecutor.shutdownNow();
-        bossGroup.shutdownGracefully(0, 5, TimeUnit.SECONDS).syncUninterruptibly();
-        workerGroup.shutdownGracefully(0, 5, TimeUnit.SECONDS).syncUninterruptibly();
+    private static long remaining(long deadline) {
+        return Math.max(1, TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()));
     }
+    @Override public void close() { RpcExecutors.requireExternalThread(); closeAsync().join(); }
 }
