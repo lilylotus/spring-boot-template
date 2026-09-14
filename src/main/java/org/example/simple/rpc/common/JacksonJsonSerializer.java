@@ -38,8 +38,10 @@ public final class JacksonJsonSerializer implements MessageSerializer {
         this.objectMapper = configure(Objects.requireNonNull(objectMapper, "Jackson 映射器不能为空"));
     }
 
+    @Override public byte id() { return 1; }
+
     @Override
-    public byte[] serialize(Object value) {
+    public byte[] serialize(Object value, java.lang.reflect.Type type) {
         try {
             return objectMapper.writeValueAsBytes(value);
         } catch (RuntimeException exception) {
@@ -48,17 +50,17 @@ public final class JacksonJsonSerializer implements MessageSerializer {
     }
 
     @Override
-    public <T> T deserialize(byte[] bytes, Class<T> type) {
+    public Object deserialize(byte[] bytes, java.lang.reflect.Type type) {
         Objects.requireNonNull(bytes, "消息字节不能为空");
         Objects.requireNonNull(type, "目标类型不能为空");
         try {
-            return objectMapper.readValue(bytes, type);
+            validateInput(bytes);
+            return objectMapper.readValue(bytes, objectMapper.constructType(type));
         } catch (RuntimeException exception) {
             throw serializationFailure("JSON 反序列化失败", exception);
         }
     }
 
-    @Override
     public JsonNode toTree(Object value) {
         try {
             return objectMapper.valueToTree(value);
@@ -67,13 +69,34 @@ public final class JacksonJsonSerializer implements MessageSerializer {
         }
     }
 
-    @Override
     public <T> T fromTree(JsonNode node, Class<T> type) {
         Objects.requireNonNull(type, "目标类型不能为空");
         try {
             return objectMapper.treeToValue(node, type);
         } catch (RuntimeException exception) {
             throw serializationFailure("JSON 参数类型转换失败", exception);
+        }
+    }
+
+    private void validateInput(byte[] bytes) {
+        try (var parser = objectMapper.createParser(bytes)) {
+            java.util.ArrayDeque<int[]> containers = new java.util.ArrayDeque<>();
+            for (var token = parser.nextToken(); token != null; token = parser.nextToken()) {
+                if (token == tools.jackson.core.JsonToken.END_ARRAY
+                    || token == tools.jackson.core.JsonToken.END_OBJECT) {
+                    containers.pop(); continue;
+                }
+                if (!containers.isEmpty() && token != tools.jackson.core.JsonToken.PROPERTY_NAME) {
+                    if (++containers.peek()[0] > 10000) {
+                        throw new IllegalArgumentException("集合元素数量超过上限");
+                    }
+                }
+                if (token == tools.jackson.core.JsonToken.START_ARRAY
+                    || token == tools.jackson.core.JsonToken.START_OBJECT) {
+                    if (containers.size() >= 64) { throw new IllegalArgumentException("嵌套深度超过上限"); }
+                    containers.push(new int[1]);
+                }
+            }
         }
     }
 

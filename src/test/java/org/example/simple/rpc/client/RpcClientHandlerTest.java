@@ -1,102 +1,28 @@
 package org.example.simple.rpc.client;
 
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
-import io.netty.channel.DefaultEventLoop;
-import io.netty.channel.embedded.EmbeddedChannel;
-import io.netty.util.concurrent.Promise;
-import org.junit.jupiter.api.AfterEach;
+import java.util.concurrent.*;
+import org.example.simple.rpc.server.*;
+import org.example.simple.rpc.config.RpcConfig;
 import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
-import org.example.simple.rpc.common.RpcErrorCode;
-import org.example.simple.rpc.common.RpcException;
-import org.example.simple.rpc.common.RpcResponse;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
-/**
- * RPC 客户端响应关联处理器测试。
- */
 class RpcClientHandlerTest {
-
-    private final DefaultEventLoop responseEventLoop = new DefaultEventLoop();
-
-    @AfterEach
-    void closeResponseEventLoop() {
-        responseEventLoop.shutdownGracefully(0, 5, TimeUnit.SECONDS)
-            .syncUninterruptibly();
-    }
-
-    @Test
-    void outOfOrderResponsesCompleteMatchingCalls() {
-        ConcurrentMap<String, Promise<RpcResponse>> pendingCalls = new ConcurrentHashMap<>();
-        Promise<RpcResponse> firstPromise = responseEventLoop.newPromise();
-        Promise<RpcResponse> secondPromise = responseEventLoop.newPromise();
-        pendingCalls.put("请求-一", firstPromise);
-        pendingCalls.put("请求-二", secondPromise);
-        EmbeddedChannel channel = new EmbeddedChannel(new RpcClientHandler(pendingCalls, responseEventLoop));
-
-        channel.writeInbound(RpcResponse.success("请求-二", "null"));
-        channel.writeInbound(RpcResponse.success("请求-一", "null"));
-        responseEventLoop.submit(() -> {
-        }).syncUninterruptibly();
-
-        assertEquals("请求-一", firstPromise.getNow().requestId());
-        assertEquals("请求-二", secondPromise.getNow().requestId());
-        assertTrue(pendingCalls.isEmpty());
-        channel.finishAndReleaseAll();
-    }
-
-    @Test
-    void disconnectedChannelFailsAllPendingCalls() {
-        ConcurrentMap<String, Promise<RpcResponse>> pendingCalls = new ConcurrentHashMap<>();
-        Promise<RpcResponse> promise = responseEventLoop.newPromise();
-        pendingCalls.put("请求-断连", promise);
-        EmbeddedChannel channel = new EmbeddedChannel(new RpcClientHandler(pendingCalls, responseEventLoop));
-
-        channel.close();
-        responseEventLoop.submit(() -> {
-        }).syncUninterruptibly();
-
-        RpcException cause = assertThrows(RpcException.class, promise::syncUninterruptibly);
-        assertEquals(RpcErrorCode.CONNECTION_CLOSED, cause.getErrorCode());
-        assertTrue(pendingCalls.isEmpty());
-        channel.finishAndReleaseAll();
-    }
-
-    @Test
-    void responseCompletionIsQueuedOnDefaultEventLoop() throws InterruptedException {
-        ConcurrentMap<String, Promise<RpcResponse>> pendingCalls = new ConcurrentHashMap<>();
-        Promise<RpcResponse> promise = responseEventLoop.newPromise();
-        pendingCalls.put("请求-异步", promise);
-        EmbeddedChannel channel = new EmbeddedChannel(new RpcClientHandler(pendingCalls, responseEventLoop));
-        CountDownLatch eventLoopBlocked = new CountDownLatch(1);
-        CountDownLatch releaseEventLoop = new CountDownLatch(1);
-        responseEventLoop.execute(() -> {
-            eventLoopBlocked.countDown();
-            try {
-                releaseEventLoop.await();
-            } catch (InterruptedException exception) {
-                Thread.currentThread().interrupt();
-            }
+    interface Service { String echo(String value); }
+    @Test void outOfOrderMixedEncodingResponsesMatchRequests() throws Exception {
+        ServiceRegistry registry = new ServiceRegistry();
+        registry.register("服务", Service.class, (Service) value -> {
+            if (value.equals("慢")) { try { Thread.sleep(100); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); } }
+            return value;
         });
-
-        assertTrue(eventLoopBlocked.await(1, TimeUnit.SECONDS));
-        try {
-            channel.writeInbound(RpcResponse.success("请求-异步", "null"));
-            assertFalse(promise.isDone());
-        } finally {
-            releaseEventLoop.countDown();
+        try (RpcServer server = new RpcServer(registry); RpcClient client = new RpcClient()) {
+            server.start("127.0.0.1", 0); client.connect("127.0.0.1", server.getPort());
+            CompletableFuture<String> slow = client.invokeAsync("服务", "echo", String.class,
+                new Class<?>[]{String.class}, new Object[]{"慢"}, new CallOptions((byte) 2, 5000, null, false, 0));
+            CompletableFuture<String> fast = client.invokeAsync("服务", "echo", String.class,
+                new Class<?>[]{String.class}, new Object[]{"快"}, new CallOptions((byte) 1, 5000, null, false, 0));
+            assertEquals("快", fast.get(2, TimeUnit.SECONDS)); assertEquals("慢", slow.get(2, TimeUnit.SECONDS));
+            assertEquals(0, client.pendingCount());
         }
-
-        promise.syncUninterruptibly();
-        assertEquals("请求-异步", promise.getNow().requestId());
-        channel.finishAndReleaseAll();
     }
 }

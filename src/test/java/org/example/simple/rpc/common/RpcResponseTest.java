@@ -1,38 +1,23 @@
 package org.example.simple.rpc.common;
 
 import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-
-/**
- * RPC 响应字符串结果约束测试。
- */
 class RpcResponseTest {
-
-    private final JacksonJsonSerializer serializer = new JacksonJsonSerializer();
-
-    @Test
-    void jsonStringResultSurvivesResponseRoundTrip() {
-        String resultJson = "{\"name\":\"测试\"}";
-        RpcResponse response = RpcResponse.success("请求-结果", resultJson);
-
-        RpcResponse decoded = serializer.deserialize(serializer.serialize(response), RpcResponse.class);
-
-        assertEquals(resultJson, decoded.result());
+    @Test void bothSerializersPreserveNullAndEmptyValues() {
+        for (MessageSerializer serializer : new MessageSerializer[]{new JacksonJsonSerializer(), new ProtostuffSerializer()}) {
+            for (String value : new String[]{null, "", "中文结果"}) {
+                RpcResponse response = RpcResponse.success(RpcPayload.of(value, String.class, serializer));
+                RpcResponse decoded = serializer.deserialize(serializer.serialize(response), RpcResponse.class);
+                assertEquals(value, decoded.result().decode(String.class, serializer));
+            }
+            RpcResponse failure = RpcResponse.failure(RpcErrorCode.SERVER_BUSY, "繁忙");
+            assertEquals(failure, serializer.deserialize(serializer.serialize(failure), RpcResponse.class));
+        }
     }
-
-    @Test
-    void successfulNullValueUsesJsonNullText() {
-        RpcResponse response = RpcResponse.success("请求-空值", "null");
-
-        assertEquals("null", response.result());
-        assertNull(response.error());
-    }
-
-    @Test
-    void successfulResponseRejectsJavaNullResult() {
-        assertThrows(NullPointerException.class, () -> RpcResponse.success("请求-非法空值", null));
+    @Test void rejectsInconsistentResponse() {
+        assertThrows(IllegalArgumentException.class, () -> new RpcResponse(true, null, null));
+        assertThrows(IllegalArgumentException.class, () -> new RpcResponse(false, null, null));
+        assertThrows(IllegalArgumentException.class, () -> new RpcPayload(true, new byte[]{1}));
     }
 }
