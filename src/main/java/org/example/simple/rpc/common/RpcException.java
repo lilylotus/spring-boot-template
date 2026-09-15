@@ -1,8 +1,6 @@
 package org.example.simple.rpc.common;
 
-/**
- * RPC 客户端或公共协议处理失败时抛出的异常。
- */
+/** RPC 客户端或公共协议处理失败时抛出的异常。 */
 public class RpcException extends RuntimeException {
 
     private final RpcErrorCode errorCode;

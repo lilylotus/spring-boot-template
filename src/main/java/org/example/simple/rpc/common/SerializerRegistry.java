@@ -1,11 +1,12 @@
 package org.example.simple.rpc.common;
 
-import java.util.Map;
 import java.util.HashMap;
+import java.util.Map;
 
 /** 启动后不可变的编码注册表。 */
 public final class SerializerRegistry {
     private final Map<Byte, MessageSerializer> serializers;
+
     public SerializerRegistry(MessageSerializer... values) {
         Map<Byte, MessageSerializer> entries = new HashMap<>();
         for (MessageSerializer value : values) {
@@ -15,12 +16,16 @@ public final class SerializerRegistry {
         }
         serializers = Map.copyOf(entries);
     }
+
     public static SerializerRegistry defaults() {
         return new SerializerRegistry(new JacksonJsonSerializer(), new ProtostuffSerializer());
     }
+
     public MessageSerializer get(byte id) {
         MessageSerializer serializer = serializers.get(id);
-        if (serializer == null) { throw new IllegalArgumentException("未启用的序列化编号: " + id); }
+        if (serializer == null) {
+            throw new IllegalArgumentException("未启用的序列化编号: " + id);
+        }
         return serializer;
     }
 }

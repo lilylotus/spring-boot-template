@@ -7,7 +7,11 @@ public record RpcResponse(boolean success, RpcPayload result, RpcError error) {
             throw new IllegalArgumentException("响应状态与结果不一致");
         }
     }
-    public static RpcResponse success(RpcPayload result) { return new RpcResponse(true, result, null); }
+
+    public static RpcResponse success(RpcPayload result) {
+        return new RpcResponse(true, result, null);
+    }
+
     public static RpcResponse failure(RpcErrorCode code, String message) {
         return new RpcResponse(false, null, new RpcError(code, message));
     }

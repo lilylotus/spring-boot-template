@@ -1,8 +1,6 @@
 package org.example.simple.rpc.common;
 
-/**
- * RPC 调用失败时可安全传输给客户端的错误类型。
- */
+/** RPC 调用失败时可安全传输给客户端的错误类型。 */
 public enum RpcErrorCode {
     /** 请求字段或参数不合法。 */
     INVALID_REQUEST,
