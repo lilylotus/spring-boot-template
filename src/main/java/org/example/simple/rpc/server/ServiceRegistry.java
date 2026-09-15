@@ -9,9 +9,7 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
-/**
- * 显式注册 RPC 服务及其允许远程调用的接口方法。
- */
+/** 显式注册 RPC 服务及其允许远程调用的接口方法。 */
 public final class ServiceRegistry {
 
     private final Map<String, RegisteredService> services = new ConcurrentHashMap<>();
@@ -34,10 +32,13 @@ public final class ServiceRegistry {
             throw new IllegalArgumentException("服务实现必须实现指定接口");
         }
 
-        Map<MethodSignature, Method> methods = Arrays.stream(serviceInterface.getMethods())
-            .filter(method -> Modifier.isPublic(method.getModifiers()))
-            .map(ServiceRegistry::prepareMethod)
-            .collect(Collectors.toUnmodifiableMap(MethodSignature::from, method -> method));
+        Map<MethodSignature, Method> methods =
+                Arrays.stream(serviceInterface.getMethods())
+                        .filter(method -> Modifier.isPublic(method.getModifiers()))
+                        .map(ServiceRegistry::prepareMethod)
+                        .collect(
+                                Collectors.toUnmodifiableMap(
+                                        MethodSignature::from, method -> method));
         RegisteredService service = new RegisteredService(implementation, methods);
         if (services.putIfAbsent(serviceName, service) != null) {
             throw new IllegalArgumentException("服务名已注册: " + serviceName);
@@ -45,14 +46,14 @@ public final class ServiceRegistry {
     }
 
     RegisteredInvocation findInvocation(
-        String serviceName,
-        String methodName,
-        List<String> parameterTypeNames) {
+            String serviceName, String methodName, List<String> parameterTypeNames) {
         RegisteredService service = services.get(serviceName);
         if (service == null) {
             return null;
         }
-        Method method = service.methods().get(new MethodSignature(methodName, List.copyOf(parameterTypeNames)));
+        Method method =
+                service.methods()
+                        .get(new MethodSignature(methodName, List.copyOf(parameterTypeNames)));
         if (method == null) {
             return null;
         }
@@ -77,21 +78,18 @@ public final class ServiceRegistry {
     }
 
     /** 已注册的服务实例及其允许调用的方法。 */
-    private record RegisteredService(Object implementation, Map<MethodSignature, Method> methods) {
-    }
+    private record RegisteredService(Object implementation, Map<MethodSignature, Method> methods) {}
 
     /** 用于精确匹配重载方法的签名。 */
     private record MethodSignature(String methodName, List<String> parameterTypeNames) {
 
         private static MethodSignature from(Method method) {
-            List<String> typeNames = Arrays.stream(method.getParameterTypes())
-                .map(Class::getName)
-                .toList();
+            List<String> typeNames =
+                    Arrays.stream(method.getParameterTypes()).map(Class::getName).toList();
             return new MethodSignature(method.getName(), typeNames);
         }
     }
 
     /** 已定位的服务实例和接口方法。 */
-    record RegisteredInvocation(Object implementation, Method method) {
-    }
+    record RegisteredInvocation(Object implementation, Method method) {}
 }

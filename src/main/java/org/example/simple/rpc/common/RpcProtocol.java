@@ -10,5 +10,6 @@ public final class RpcProtocol {
     public static final byte RESPONSE = 2;
     public static final byte PING = 3;
     public static final byte PONG = 4;
-    private RpcProtocol() { }
+
+    private RpcProtocol() {}
 }
