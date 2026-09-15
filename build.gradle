@@ -88,6 +88,10 @@ dependencies {
     implementation 'org.mapstruct:mapstruct:1.6.3'
     implementation 'org.apache.httpcomponents.client5:httpclient5:5.6.4'
 
+    /* 自定义二进制协议RPC框架(com.example.template.rpc)依赖，用netty-all一站式引入
+       transport/codec/handler等子模块，不单独拆分；版本沿用4.1系列最新稳定版 */
+    implementation 'io.netty:netty-all:4.1.138.Final'
+
     /*implementation 'com.fasterxml.jackson.core:jackson-core:2.22.2'
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.22.2'
     implementation 'com.fasterxml.jackson.core:jackson-annotations:2.22'
