@@ -4,6 +4,11 @@ server:
 spring:
   application:
     name: SpringBootTemplate
+  servlet:
+    # 通用文件上传接口的multipart限制，超出后Spring MVC直接拒绝请求，不会进入Controller逻辑
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 20MB
   profiles:
     active: prod
   config:
@@ -122,6 +127,14 @@ spring:
         # 关闭连接池时的超时时间(优雅关闭用，配合你之前问的容器优雅关闭场景)
         shutdown-timeout: 200ms
 
+  # 数据库版本由 Flyway 管理，迁移脚本位于 src/main/resources/db/migration，
+  # 命名规范为 V<版本号>__<描述>.sql
+  # 避免应用启动阶段因连接失败而报错；连接到真实数据库后再打开。
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
 # com.baomidou.mybatisplus.autoconfigure.MybatisPlusProperties
 mybatis-plus:
   config-location: classpath:mybatis/mybatis.conf
@@ -130,6 +143,12 @@ mybatis-plus:
   global-config:
     db-config:
       id-type: auto
+
+# 通用文件上传下载功能配置，对应 FileStorageProperties
+file:
+  storage:
+    # 文件落盘的存储根目录：相对路径相对JVM工作目录(即项目根目录)解析，启动时目录不存在会自动创建
+    base-dir: upload
 
 feign:
   pool:

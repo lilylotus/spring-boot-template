@@ -8,6 +8,9 @@ build/
 ### Log4j2 运行时日志输出 ###
 logs/
 
+### 通用文件上传下载功能运行期产生的本地存储目录 ###
+/upload/
+
 ### STS ###
 .apt_generated
 .classpath

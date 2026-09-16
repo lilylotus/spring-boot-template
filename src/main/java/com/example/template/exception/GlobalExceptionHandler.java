@@ -20,8 +20,10 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import com.example.template.file.exception.FileStorageException;
 import com.example.template.response.RestResult;
 import com.example.template.response.RestResultUtils;
 
@@ -40,6 +42,7 @@ public class GlobalExceptionHandler {
     private static final String REQUEST_BODY_ERROR_MESSAGE = "请求体格式错误";
     private static final String UNSUPPORTED_MEDIA_TYPE_MESSAGE = "请求媒体类型不支持";
     private static final String RESOURCE_NOT_FOUND_MESSAGE = "请求的资源不存在";
+    private static final String UPLOAD_SIZE_EXCEEDED_MESSAGE = "上传文件大小超出限制";
     private static final String INTERNAL_ERROR_MESSAGE = "服务器内部错误";
 
     /**
@@ -164,6 +167,34 @@ public class GlobalExceptionHandler {
     public ResponseEntity<RestResult<Void>> handleNoResourceFound(NoResourceFoundException exception) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
             .body(RestResultUtils.failure(HttpStatus.NOT_FOUND.value(), RESOURCE_NOT_FOUND_MESSAGE));
+    }
+
+    /**
+     * 处理上传文件超出 {@code spring.servlet.multipart} 配置的大小上限产生的异常。
+     * <p>
+     * 该异常在 Spring MVC 解析 multipart 请求参数阶段抛出，早于 Controller 方法内的业务校验，
+     * 因此单独处理，避免落入兜底的未预期异常分支。
+     *
+     * @param exception 上传大小超限异常
+     * @return HTTP 413 统一错误响应
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<RestResult<Void>> handleMaxUploadSizeExceeded(
+        MaxUploadSizeExceededException exception) {
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+            .body(RestResultUtils.failure(HttpStatus.PAYLOAD_TOO_LARGE.value(), UPLOAD_SIZE_EXCEEDED_MESSAGE));
+    }
+
+    /**
+     * 处理文件上传下载流程中可预期的业务异常，按异常自带的 HTTP 状态码返回。
+     *
+     * @param exception 文件存储业务异常
+     * @return 异常自带状态码的统一错误响应
+     */
+    @ExceptionHandler(FileStorageException.class)
+    public ResponseEntity<RestResult<Void>> handleFileStorageException(FileStorageException exception) {
+        return ResponseEntity.status(exception.getHttpStatus())
+            .body(RestResultUtils.failure(exception.getHttpStatus().value(), exception.getMessage()));
     }
 
     /**
