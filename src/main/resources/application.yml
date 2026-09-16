@@ -19,9 +19,9 @@ spring:
   cloud:
     inetutils:
       preferredNetworks:
-        - 10.4
+        - 10.
     nacos:
-      server-addr: 10.4.100.124:8848
+      server-addr: 10.10.88.31:8848
 #      username: nacos
 #      password: nacos
       config:
@@ -66,7 +66,7 @@ spring:
   datasource:
     type: com.zaxxer.hikari.HikariDataSource
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://10.4.100.124:3306/test?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://10.10.88.31:3306/test?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: root
     password: mysql
     hikari:
@@ -98,7 +98,7 @@ spring:
 
   data:
     redis:
-      host: 10.4.100.124
+      host: 10.10.88.31
       port: 6379
       password: redis
       database: 5

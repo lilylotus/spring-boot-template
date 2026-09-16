@@ -1,3 +1,9 @@
+-- [已废弃/仅供参考] batch_test、tb_user_data两张表的建表语句已迁移到Flyway管理
+-- (src/main/resources/db/migration/V2__create_batch_test_and_user_data_tables.sql)，
+-- 应用启动时自动执行，不再需要手动运行本文件建表。
+-- 本文件下方的建表语句、INSERT种子数据保留作历史参考；rbac_*演示表及穿插的
+-- EXPLAIN/TRUNCATE等探索性查询与现有Java代码无关联，未纳入Flyway管理，仍需手动执行才能使用。
+
 create table batch_test (
 	id int not null auto_increment ,
 

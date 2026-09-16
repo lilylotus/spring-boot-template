@@ -1,0 +1,116 @@
+services:
+  mysql:
+    image: mysql:8.4.10
+    container_name: mysql
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: mysql
+      MYSQL_DATABASE: test
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command:
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_general_ci
+      --lower_case_table_names=1
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pmysql"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - middleware-net
+
+  redis:
+    image: redis:7.2.16
+    container_name: redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass redis
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - middleware-net
+
+  rabbitmq:
+    # https://www.rabbitmq.com/release-information
+    image: rabbitmq:3.13.6-management
+    container_name: rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: rabbitmq
+      RABBITMQ_DEFAULT_PASS: rabbitmq
+      TZ: Asia/Shanghai
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - rabbitmq_log:/var/log/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - middleware-net
+
+  nacos:
+    image: nacos/nacos-server:v2.5.4
+    container_name: nacos
+    restart: unless-stopped
+    ports:
+      - "8848:8848"    # 主端口: 控制台 + OpenAPI
+      - "9848:9848"    # gRPC端口(客户端SDK使用，2.x起必须开放，否则服务注册/配置监听会失败)
+      - "9849:9849"    # gRPC端口(集群间通信用，单机模式也建议开放以防后续扩集群)
+    environment:
+      MODE: standalone
+      # false关闭鉴权，接口和控制台都不需要登录校验
+      NACOS_AUTH_ENABLE: "false"
+      # 生成 JWT Token 用的密钥，必须超过32位字符，并做 Base64 编码，不能用默认值
+      # echo -n "ThisIsMyCustomSecretKey01234567890123456789012345" | base64
+      NACOS_AUTH_TOKEN: "VGhpc0lzTXlDdXN0b21TZWNyZXRLZXkwMTIzNDU2Nzg5MDEyMzQ1Njc4OTA="
+      # 服务端之间内部通信的身份识别 key
+      NACOS_AUTH_IDENTITY_KEY: "nacos"
+      # 对应的身份识别 value
+      NACOS_AUTH_IDENTITY_VALUE: "nacos"
+      # JVM内存参数(单机测试/小规模场景，生产大规模需要按实际调大)
+      JVM_XMS: 512m
+      JVM_XMX: 512m
+      JVM_XMN: 256m
+      TZ: Asia/Shanghai
+    volumes:
+      - nacos_data:/home/nacos/data
+      - nacos_logs:/home/nacos/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8848/nacos/v1/console/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - middleware-net
+
+networks:
+  middleware-net:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  redis_data:
+  rabbitmq_data:
+  rabbitmq_log:
+  nacos_data:
+  nacos_logs:
