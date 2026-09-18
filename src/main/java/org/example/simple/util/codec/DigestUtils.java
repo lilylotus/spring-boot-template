@@ -1,4 +1,4 @@
-package org.example.simple.util;
+package org.example.simple.util.codec;
 
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
