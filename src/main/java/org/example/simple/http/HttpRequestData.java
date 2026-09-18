@@ -3,12 +3,7 @@ package org.example.simple.http;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 
 /**
  * 不可变 HTTP 请求描述。
@@ -74,32 +69,44 @@ public final class HttpRequestData {
         return new Builder(HttpMethod.DELETE, url);
     }
 
-    /** @return HTTP 方法 */
+    /**
+     * @return HTTP 方法
+     */
     public HttpMethod method() {
         return method;
     }
 
-    /** @return HTTP 或 HTTPS URL 文本 */
+    /**
+     * @return HTTP 或 HTTPS URL 文本
+     */
     public String url() {
         return url;
     }
 
-    /** @return 不可变请求头 */
+    /**
+     * @return 不可变请求头
+     */
     public Map<String, List<String>> headers() {
         return headers;
     }
 
-    /** @return 不可变查询参数 */
+    /**
+     * @return 不可变查询参数
+     */
     public Map<String, List<String>> queryParameters() {
         return queryParameters;
     }
 
-    /** @return 可选请求体 */
+    /**
+     * @return 可选请求体
+     */
     public Optional<HttpRequestBody> body() {
         return Optional.ofNullable(body);
     }
 
-    /** @return 可选单次请求超时 */
+    /**
+     * @return 可选单次请求超时
+     */
     public Optional<Duration> timeout() {
         return Optional.ofNullable(timeout);
     }
@@ -155,7 +162,7 @@ public final class HttpRequestData {
         /**
          * 增加请求头，不覆盖同名已有值。
          *
-         * @param name 请求头名称
+         * @param name  请求头名称
          * @param value 请求头值
          * @return 当前构建器
          */
@@ -167,7 +174,7 @@ public final class HttpRequestData {
         /**
          * 增加 URL 查询参数，不覆盖同名已有值。
          *
-         * @param name 参数名称
+         * @param name  参数名称
          * @param value 参数值
          * @return 当前构建器
          */
