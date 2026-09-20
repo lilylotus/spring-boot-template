@@ -44,6 +44,10 @@ dependencies {
     /* 如果要处理证书、CMS、PKCS7/12这类PKI相关操作再加这个 */
     implementation 'org.bouncycastle:bcpkix-jdk18on:1.86'
 
+    implementation 'org.apache.groovy:groovy:5.1.2'
+    implementation 'org.graalvm.polyglot:js:25.2.4'
+    implementation 'org.graalvm.polyglot:polyglot:25.2.4'
+
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation platform('org.junit:junit-bom:5.10.0')
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
