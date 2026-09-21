@@ -709,12 +709,12 @@ public final class RpcClient implements AutoCloseable {
                 || call != null
                         && (call.channel != channel
                                 || frame.serializerId() != call.options.serializerId())) {
-            RpcPipeline.consumed(channel, frame);
+            RpcPipeline.consumed(budget, frame);
             channel.close();
             return;
         }
         if (call == null) {
-            RpcPipeline.consumed(channel, frame);
+            RpcPipeline.consumed(budget, frame);
             return;
         }
         RpcExecutors.Task task =
@@ -743,7 +743,7 @@ public final class RpcClient implements AutoCloseable {
                                 channel.close();
                             }
                         },
-                        () -> RpcPipeline.consumed(channel, frame));
+                        () -> RpcPipeline.consumed(budget, frame));
         try {
             codec.execute(task);
         } catch (RejectedExecutionException error) {
@@ -785,13 +785,22 @@ public final class RpcClient implements AutoCloseable {
     }
 
     void disconnected(Channel channel) {
-        pending.values()
-                .forEach(
-                        call -> {
-                            if (call.channel == channel) {
-                                finish(call, null, failure("RPC 连接已关闭", null));
-                            }
-                        });
+        // 断连事件要排在该连接已经提交的响应解码任务之后：对端优雅停机时，最后一批响应
+        // 可能已经收到但还没解码完，直接判定连接关闭会让本已成功的调用变成失败。
+        Runnable terminate =
+                () ->
+                        pending.values()
+                                .forEach(
+                                        call -> {
+                                            if (call.channel == channel) {
+                                                finish(call, null, failure("RPC 连接已关闭", null));
+                                            }
+                                        });
+        try {
+            codec.execute(terminate);
+        } catch (RejectedExecutionException rejected) {
+            terminate.run();
+        }
         synchronized (this) {
             endpoints.values().stream()
                     .filter(e -> e.channel == channel)

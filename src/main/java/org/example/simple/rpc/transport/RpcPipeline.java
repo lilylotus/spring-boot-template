@@ -1,5 +1,6 @@
 package org.example.simple.rpc.transport;
 
+import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.channel.*;
 import io.netty.handler.ssl.*;
 import io.netty.handler.timeout.*;
@@ -22,6 +23,7 @@ public final class RpcPipeline {
             String host,
             int port,
             ChannelInboundHandler handler) {
+        verifyOptions(channel, config);
         ChannelPipeline pipeline = channel.pipeline();
         if (ssl != null) {
             SslHandler tls =
@@ -110,6 +112,39 @@ public final class RpcPipeline {
                 .addLast("rpc", handler);
     }
 
+    /**
+     * 校验数据连接选项已经实际生效。
+     *
+     * <p>Netty 在选项不被 Channel 支持时只记录警告并继续运行，必须在安装管线前读回实际值，
+     * 否则生产参数会被静默忽略而无法在启动阶段发现。
+     *
+     * @param channel 已经应用过选项的数据连接
+     * @param config 期望生效的生产参数
+     * @throws IllegalStateException 当任意选项未生效时抛出，并指明具体选项名
+     */
+    private static void verifyOptions(Channel channel, RpcConfig config) {
+        ChannelConfig options = channel.config();
+        require(Boolean.TRUE.equals(options.getOption(ChannelOption.TCP_NODELAY)), "TCP_NODELAY");
+        require(Boolean.TRUE.equals(options.getOption(ChannelOption.SO_KEEPALIVE)), "SO_KEEPALIVE");
+        require(Boolean.TRUE.equals(options.getOption(ChannelOption.AUTO_READ)), "AUTO_READ");
+        require(
+                Boolean.FALSE.equals(options.getOption(ChannelOption.ALLOW_HALF_CLOSURE)),
+                "ALLOW_HALF_CLOSURE");
+        require(options.getAllocator() == PooledByteBufAllocator.DEFAULT, "ALLOCATOR");
+        WriteBufferWaterMark mark = options.getWriteBufferWaterMark();
+        require(
+                mark != null
+                        && mark.low() == config.writeLowWaterMark()
+                        && mark.high() == config.writeHighWaterMark(),
+                "WRITE_BUFFER_WATER_MARK");
+    }
+
+    private static void require(boolean applied, String option) {
+        if (!applied) {
+            throw new IllegalStateException("连接选项未生效：" + option);
+        }
+    }
+
     /** 在跨线程等待写入期间也持有字节预算。 */
     public static ChannelFuture write(Channel channel, RpcFrame frame, ByteBudget budget) {
         ChannelPromise promise = channel.newPromise();
@@ -143,7 +178,16 @@ public final class RpcPipeline {
         return promise;
     }
 
-    public static void consumed(Channel channel, RpcFrame frame) {
-        ((BudgetHandler) channel.pipeline().get("budget")).consumed(frame.body().length + 19);
+    /**
+     * 归还一个已拆帧报文占用的字节预算。
+     *
+     * <p>直接面向端级预算释放，而不是通过管线查找处理器：连接被关闭后管线会被拆除，
+     * 此时仍有报文停留在解码或业务队列中，必须保证这些字节最终回到预算。
+     *
+     * @param budget 该客户端或服务端实例的报文字节预算
+     * @param frame 已经完成处理或被丢弃的报文
+     */
+    public static void consumed(ByteBudget budget, RpcFrame frame) {
+        budget.release(frame.body().length + RpcProtocol.HEADER_LENGTH);
     }
 }

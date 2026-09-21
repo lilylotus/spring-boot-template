@@ -26,12 +26,12 @@ final class RpcServerHandler extends SimpleChannelInboundHandler<RpcFrame> {
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, RpcFrame frame) {
         if (frame.messageType() != RpcProtocol.REQUEST) {
-            RpcPipeline.consumed(ctx.channel(), frame);
+            RpcPipeline.consumed(server.budget, frame);
             ctx.close();
             return;
         }
         RpcExecutors.Lease lease =
-            new RpcExecutors.Lease(() -> RpcPipeline.consumed(ctx.channel(), frame));
+            new RpcExecutors.Lease(() -> RpcPipeline.consumed(server.budget, frame));
         RpcExecutors.Task task = new RpcExecutors.Task(() -> decode(ctx, frame, lease), lease);
         try {
             server.codec.execute(task);
