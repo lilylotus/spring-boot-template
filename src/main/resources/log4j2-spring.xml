@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Log4j2 配置文件
+
+    文件名使用 log4j2-spring.xml 而非 log4j2.xml，交由 Spring Boot 的 LoggingSystem 接管加载，
+    这样 application.yaml 中的 logging.level.* / logging.file.path 等配置才能生效。
+
+    status          : Log4j2 框架自身的内部日志级别，排查本文件配置问题时可临时改为 DEBUG
+    monitorInterval : 自动重载本配置文件的间隔(秒)，最小 5 秒，运行期改日志级别无需重启
+-->
+<Configuration status="WARN" monitorInterval="30">
+
+    <Properties>
+        <!-- 日志根目录，默认 logs(相对启动目录)；可用 application.yaml 的 logging.file.path 覆盖 -->
+        <Property name="LOG_HOME">${sys:LOG_PATH:-logs}</Property>
+        <!-- 日志文件名前缀，可用 -Dlog.file.name=xxx 覆盖 -->
+        <Property name="LOG_NAME">${sys:log.file.name:-CloudGateway}</Property>
+
+        <!-- 单个日志文件的大小上限 -->
+        <Property name="MAX_FILE_SIZE">200MB</Property>
+        <!-- 同一天内最多保留的历史文件数(即 %i 的最大值) -->
+        <Property name="MAX_FILES_PER_DAY">5</Property>
+        <!-- 历史日志保留天数 -->
+        <Property name="MAX_HISTORY_DAYS">7d</Property>
+        <!-- 历史日志文件总数上限(7 天 × 每天 5 个) -->
+        <Property name="MAX_TOTAL_FILES">35</Property>
+
+        <!--
+            %X{traceId} 取的是 MDC 中的链路 id，由 TraceFilter 写入。
+            %notEmpty 保证没有 traceId 的日志(如容器启动阶段)不会留下一对空的中括号。
+        -->
+        <!-- 控制台带颜色；%clr 由 Spring Boot 的 ColorConverter 提供 -->
+        <Property name="PATTERN_CONSOLE">%clr{%d{yyyy-MM-dd HH:mm:ss.SSS}}{faint} %clr{%5p} %clr{[%15.15t]}{faint} %clr{%notEmpty{[%X{traceId}] }}{magenta}%clr{%-40.40c{1.}}{cyan} %clr{:}{faint} %m%n%xwEx</Property>
+        <!-- 文件日志不加颜色码 -->
+        <Property name="PATTERN_FILE">%d{yyyy-MM-dd HH:mm:ss.SSS} %5p [%15.15t] %notEmpty{[%X{traceId}] }%-40.40c{1.} : %m%n%xwEx</Property>
+    </Properties>
+
+    <Appenders>
+
+        <!-- 控制台输出 -->
+        <Console name="Console" target="SYSTEM_OUT" follow="true">
+            <PatternLayout pattern="${PATTERN_CONSOLE}" charset="UTF-8"/>
+        </Console>
+
+        <!--
+            全量日志文件
+
+            滚动触发条件(满足其一即滚动)：
+              1. TimeBasedTriggeringPolicy : 按 filePattern 中最小的时间单位(%d{yyyy-MM-dd} → 天)滚动
+              2. SizeBasedTriggeringPolicy : 单文件超过 200MB 滚动
+
+            清理策略：
+              - DefaultRolloverStrategy max=5 : 同一天最多保留 5 个历史文件(-1 ~ -5)
+              - Delete                        : 超过 7 天 或 历史文件总数超过 35 个即删除
+        -->
+        <RollingFile name="AppFile"
+                     fileName="${LOG_HOME}/${LOG_NAME}.log"
+                     filePattern="${LOG_HOME}/app/${LOG_NAME}-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="${PATTERN_FILE}" charset="UTF-8"/>
+            <Policies>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+                <SizeBasedTriggeringPolicy size="${MAX_FILE_SIZE}"/>
+            </Policies>
+            <DefaultRolloverStrategy max="${MAX_FILES_PER_DAY}">
+                <Delete basePath="${LOG_HOME}/app" maxDepth="1">
+                    <IfFileName glob="*.log.gz">
+                        <IfAny>
+                            <IfLastModified age="${MAX_HISTORY_DAYS}"/>
+                            <IfAccumulatedFileCount exceeds="${MAX_TOTAL_FILES}"/>
+                        </IfAny>
+                    </IfFileName>
+                </Delete>
+            </DefaultRolloverStrategy>
+        </RollingFile>
+
+        <!-- 错误日志单独归档，只收 ERROR 及以上，便于快速定位问题 -->
+        <RollingFile name="ErrorFile"
+                     fileName="${LOG_HOME}/${LOG_NAME}-error.log"
+                     filePattern="${LOG_HOME}/error/${LOG_NAME}-error-%d{yyyy-MM-dd}-%i.log.gz">
+            <ThresholdFilter level="ERROR" onMatch="ACCEPT" onMismatch="DENY"/>
+            <PatternLayout pattern="${PATTERN_FILE}" charset="UTF-8"/>
+            <Policies>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+                <SizeBasedTriggeringPolicy size="${MAX_FILE_SIZE}"/>
+            </Policies>
+            <DefaultRolloverStrategy max="${MAX_FILES_PER_DAY}">
+                <Delete basePath="${LOG_HOME}/error" maxDepth="1">
+                    <IfFileName glob="*.log.gz">
+                        <IfAny>
+                            <IfLastModified age="${MAX_HISTORY_DAYS}"/>
+                            <IfAccumulatedFileCount exceeds="${MAX_TOTAL_FILES}"/>
+                        </IfAny>
+                    </IfFileName>
+                </Delete>
+            </DefaultRolloverStrategy>
+        </RollingFile>
+
+    </Appenders>
+
+    <!--
+        AsyncLogger / AsyncRoot 基于 LMAX Disruptor 无锁队列实现异步日志，
+        业务线程只负责入队，磁盘 IO 由后台线程完成。
+
+        includeLocation="false" : 不采集调用行号等位置信息(异步模式下代价极高)。
+                                  如果 PatternLayout 里要用 %L %M %C %l，必须改为 true。
+    -->
+    <Loggers>
+
+        <!-- 业务包日志，需要更详细的输出时把 level 调成 DEBUG -->
+        <AsyncLogger name="cn.nihility.gw" level="INFO" includeLocation="false" additivity="false">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="AppFile"/>
+            <AppenderRef ref="ErrorFile"/>
+        </AsyncLogger>
+
+        <!-- Nacos 心跳/轮询日志较啰嗦，压到 WARN -->
+        <AsyncLogger name="com.alibaba.nacos" level="WARN" includeLocation="false"/>
+
+        <AsyncRoot level="INFO" includeLocation="false">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="AppFile"/>
+            <AppenderRef ref="ErrorFile"/>
+        </AsyncRoot>
+
+    </Loggers>
+
+</Configuration>

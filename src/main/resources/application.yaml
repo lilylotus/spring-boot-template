@@ -1,0 +1,43 @@
+server:
+  port: 13579
+spring:
+  application:
+    name: CloudGateway
+  profiles:
+    active: prod
+  config:
+    import:
+      # 优先级：nacos (import 列表里面后面的配置优先级高） > 本地 (application.yml)
+      - optional:nacos:${spring.application.name}.yml
+      - optional:nacos:${spring.application.name}-${spring.profiles.active}.yml
+  cloud:
+    inetutils:
+      preferredNetworks:
+        - 10.
+    nacos:
+      server-addr: 10.10.88.31:8848
+      #      username: nacos
+      #      password: nacos
+      config:
+        enabled: true
+        file-extension: yml
+      discovery:
+        enabled: true
+    openfeign:
+      httpclient:
+        # 使用 Apache HttpClient5 作为 Feign 底层客户端，替代默认的 HttpURLConnection(不支持连接池)
+        hc5:
+          enabled: true
+        # 连接池上限，按网关的下游服务数量和并发量调整
+        max-connections: 200
+        max-connections-per-route: 50
+      client:
+        config:
+          # default 是所有 FeignClient 的缺省配置，可再按 @FeignClient 的 name 单独覆盖
+          default:
+            # 建立 TCP 连接的超时时间(毫秒)
+            connect-timeout: 3000
+            # 等待下游响应的超时时间(毫秒)
+            read-timeout: 5000
+            # 需要打印 Feign 请求明细时，把对应 client 接口的日志级别调到 DEBUG 才会生效
+            logger-level: basic
