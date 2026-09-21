@@ -414,12 +414,28 @@ public final class ProtostuffSerializer implements MessageSerializer {
         return values;
     }
 
+    /**
+     * 判断类型是否为受支持的标量。
+     *
+     * <p>这里只列举解码侧确实能够还原的具体类型：抽象的 {@code Number} 及其它未适配的数值类型
+     * 必须在校验阶段就被拒绝，否则会通过校验却在解码时才失败。
+     *
+     * @param type 本地声明的目标类型
+     * @return 受支持时为 {@code true}
+     */
     private static boolean scalar(Class<?> type) {
         return type.isPrimitive()
                 || type == String.class
                 || type == Boolean.class
                 || type == Character.class
-                || Number.class.isAssignableFrom(type)
+                || type == Byte.class
+                || type == Short.class
+                || type == Integer.class
+                || type == Long.class
+                || type == Float.class
+                || type == Double.class
+                || type == java.math.BigDecimal.class
+                || type == java.math.BigInteger.class
                 || type == byte[].class
                 || type.isEnum()
                 || type == Date.class

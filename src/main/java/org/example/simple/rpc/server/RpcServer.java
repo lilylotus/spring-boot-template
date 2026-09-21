@@ -274,6 +274,22 @@ public final class RpcServer implements AutoCloseable {
                         business.shutdown();
                         business.awaitTermination(
                             remaining(drainDeadline), TimeUnit.MILLISECONDS);
+                        // 业务线程结束时，响应可能刚提交写入还没刷出。这里追加一次空写入并等待其
+                        // 完成：Netty 保证写入按顺序完成，因此它完成时前序响应已经真正发出，
+                        // 否则关闭子 Channel 会把已受理的在途响应直接丢弃。
+                        // 业务线程结束时，响应可能只是刚被提交到事件循环、还没真正刷出。
+                        // 先让事件循环追平已排队的写入任务，再等待出站缓冲清空，
+                        // 否则关闭子 Channel 会把已经受理的在途响应直接丢弃。
+                        for (Channel channel : channels) {
+                            channel.eventLoop()
+                                .submit(() -> { })
+                                .awaitUninterruptibly(remaining(drainDeadline));
+                            while (channel.isActive()
+                                && channel.bytesBeforeUnwritable() < config.writeHighWaterMark()
+                                && System.nanoTime() < drainDeadline) {
+                                Thread.sleep(5);
+                            }
+                        }
                         long closeDeadline =
                             System.nanoTime()
                                 + TimeUnit.MILLISECONDS.toNanos(

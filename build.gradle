@@ -55,6 +55,11 @@ dependencies {
 
 test {
     useJUnitPlatform()
+    /* 压力与故障验证默认关闭，使用 -Drpc.stress=true 启用 */
+    systemProperty 'rpc.stress', System.getProperty('rpc.stress', 'false')
+    /* 泄漏检测生产基线为 SIMPLE，专项验证使用 -Dio.netty.leakDetection.level=PARANOID */
+    systemProperty 'io.netty.leakDetection.level',
+        System.getProperty('io.netty.leakDetection.level', 'SIMPLE')
 }
 
 /* Gradle 指定编码,Java 编译的时候缺省状态下会因为中文字符而失败 */
