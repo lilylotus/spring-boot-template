@@ -3,6 +3,7 @@ package org.example.simple.rpc.common;
 /** RPC 客户端或公共协议处理失败时抛出的异常。 */
 public class RpcException extends RuntimeException {
 
+    /** 稳定的错误类型，供调用方按类型判断处理方式（如是否可重试）。 */
     private final RpcErrorCode errorCode;
 
     /**

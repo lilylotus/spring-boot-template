@@ -8,7 +8,12 @@ import java.util.List;
 
 /** 策略只从调用方已经过滤的连接快照中选择，不执行网络操作。 */
 public interface LoadBalancer {
-    /** 已建立连接且可被选择的服务实例。 */
+    /**
+     * 已建立连接且可被选择的服务实例。
+     *
+     * @param instance 实例路由信息，权重等策略所需数据取自此处
+     * @param channel 该实例对应的、调用方已确认可写的连接
+     */
     record Candidate(ServiceInstance instance, Channel channel) {}
 
     /**
