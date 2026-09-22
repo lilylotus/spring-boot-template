@@ -55,7 +55,69 @@ spring:
               predicates:
                 - Path=/proxy/**
               filters:
+                # 顺序是设计决定，不要随手调：网关按本列表的下标分配过滤器 order。
+                # 限流必须排在熔断之前——超配额的请求根本没调用下游，不应该污染熔断的失败率样本，
+                # 反过来排会让一次限流风暴把熔断也带开；两者又都排在路径改写之前，
+                # 这样被拒绝的请求不用白做一次改写，限流日志里记的也是原始路径 /proxy/xxx
+                - Resilience4jRateLimiter=bootDemoRateLimiter
+                # 熔断用网关内置的过滤器，打开时 forward 到降级接口(不能落在 /proxy 下，否则回环)
+                - name: CircuitBreaker
+                  args:
+                    name: bootDemoCircuitBreaker
+                    fallbackUri: forward:/fallback/boot-demo
+                    # 不显式列出就只有异常(连接失败/超时)计入失败率，下游的 5xx 不会计入
+                    statusCodes: 500,502,503,504
                 # 转发前剥掉第一段路径 /proxy，下游收到的是不带前缀的业务路径
                 - StripPrefix=1
                 # 保留调用方原始 Host 头，不替换成被选中实例的 host:port
                 - PreserveHostHeader
+
+# 熔断与限流参数。阈值是可用的起始值，不是调优结果，正式配额要按 BootDemo 的实际容量定
+resilience4j:
+  # 三个模块都遵循同一个套路：参数放在 configs.default 里，instances 下只留实例名占位。
+  # resilience4j 中名字叫 default 的 config 是特殊的，它同时管两种「没有配置」：
+  #   1) 列在 instances 下但没写 base-config 的实例，继承 default 的取值
+  #   2) 压根没列出来、由代码按名字临时创建的实例，拿到的也是 default（它就是 Registry 的默认配置）
+  # 所以新增路由时即使忘了加配置，也是有保护的，而不是退化成库默认值——库默认值对网关是危险的，见下面各处注释。
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-type: COUNT_BASED
+        # 库默认窗口是 100，起判太迟；冷却库默认 60s，太长
+        sliding-window-size: 20
+        # 样本不足时不判定，避免启动初期几次抖动就把熔断打开
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50
+        # 慢调用也算故障：下游不报错但一直拖着，同样会拖垮网关
+        slow-call-duration-threshold: 3s
+        slow-call-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+    instances:
+      # 取值与 default 完全一致，列在这里只是让实例名在配置里可见，便于日后单独调参
+      bootDemoCircuitBreaker: {}
+  timelimiter:
+    configs:
+      default:
+        # 必须设。spring-cloud-circuitbreaker 的响应式实现会给每次调用套一层 Mono.timeout()，
+        # 不设就落到库默认的 1 秒，所有 /proxy 请求被静默截断，
+        # 上面的 slow-call-duration-threshold: 3s 也永远够不到
+        timeout-duration: 5s
+        # 超时后不去中断上游线程，交给 Reactor 的取消信号处理
+        cancel-running-future: false
+    instances:
+      # 实例名必须与路由上 CircuitBreaker 过滤器的 name 一致
+      bootDemoCircuitBreaker: {}
+  ratelimiter:
+    configs:
+      default:
+        # 这是单实例内存级限流，集群实际放行量 = 本值 × 网关实例数
+        # 按「期望总配额 / 实例数」来配
+        limit-for-period: 50
+        limit-refresh-period: 1s
+        # 必须为 0。库默认是 5s，非零会让 acquirePermission 阻塞 Netty 事件循环线程，
+        # 限流本身就成了压垮网关的原因；过滤器装配时会校验这一点
+        timeout-duration: 0
+    instances:
+      bootDemoRateLimiter: {}

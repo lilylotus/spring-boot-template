@@ -144,6 +144,51 @@ spring.config.import:
 
 `CloudGatewayApplication` 就是一个光秃秃的 `@SpringBootApplication`，还没有自定义 bean；对应的测试是一个空的 `@SpringBootTest` 上下文加载检查。
 
+## 熔断与限流（resilience4j）
+
+`/proxy/**` 路由上挂了两层保护，过滤器顺序是 `Resilience4jRateLimiter` → `CircuitBreaker` → `StripPrefix` → `PreserveHostHeader`。**顺序是设计决定，不是随手排的**：超配额的请求根本没调用下游，不应该污染熔断的失败率样本；反过来排会让一次限流风暴把熔断也带开。`ProxyRouteConfigTest` 按下标断言了这个顺序。
+
+**熔断用框架现成的，限流必须自己写。** gateway 4.3.5 自带 `SpringCloudCircuitBreakerResilience4JFilterFactory`，配上 reactor-resilience4j starter 直接写 `CircuitBreaker=` 就行；但它自带的限流器只有 `RedisRateLimiter` 和 `Bucket4jRateLimiter`，**没有 resilience4j 版本**（`RequestRateLimiter=` 绑的是 gateway 自己的 `RateLimiter` 接口，接不上 resilience4j 的注册表）。所以有了 `cn.nihility.gw.resilience.Resilience4jRateLimiterGatewayFilterFactory`。
+
+`build.gradle` 里这个 starter **不要写版本号**：`spring-cloud-dependencies:2025.0.3` BOM 会把它定到 `3.3.3`，resilience4j 核心库 `2.2.0`，写死只会误导（曾经写过 `5.0.2`）。
+
+### 三个会咬人的地方
+
+1. **`resilience4j.ratelimiter.*.timeout-duration` 必须是 `0`。** `RateLimiter.acquirePermission()` 在配额耗尽时会**阻塞调用线程**直到超时——在 WebFlux 里那是 Netty 事件循环，限流本身就成了压垮网关的原因。过滤器在装配期会校验这一点，非零直接快速失败。这道校验顺带也兜住「实例名写错」：写错会落到 resilience4j 的默认配置，默认 timeout 就是 5 秒。
+
+2. **`resilience4j.timelimiter.*` 必须显式配，实例名要与 `CircuitBreaker` 过滤器的 `name` 一致。** `ReactiveResilience4JCircuitBreaker` 会给每次调用套一层 `Mono.timeout(...)`，不配就落到 resilience4j 的默认值 **1 秒**——所有 `/proxy` 请求被静默截断，而且 `slow-call-duration-threshold: 3s` 永远够不到。现在配的是 3s 起算慢调用、5s 判超时。`ProxyCircuitBreakerTest.shouldNotTimeOutAtResilience4jDefaultOneSecond` 用一个耗时 2 秒的打桩下游给这条做了防回归。
+
+3. **限流是单实例内存级的，不是分布式的。** resilience4j 的 `RateLimiter` 状态只在当前 JVM，集群实际放行量 = 配置值 × 网关实例数。按「期望总配额 / 实例数」来配。要精确的全局配额只能换 Redis + 内置 `RequestRateLimiter`。
+
+### 配置默认值：`configs.default`
+
+resilience4j 三个模块（circuitbreaker / timelimiter / ratelimiter）的参数都放在 `configs.default` 里，`instances` 下只留实例名占位（`bootDemoRateLimiter: {}`）。名字叫 `default` 的 config 在 resilience4j 里是特殊的，它同时管住两种「没有配置」：
+
+- **列在 `instances` 下但没写 `base-config`** —— `createCircuitBreakerConfig` 之类的方法会回退到名为 `default` 的 config
+- **压根没列出来、由代码按名字临时创建** —— `configs` 传给 `XxxRegistry.of(Map)` 后，`default` 项就是 Registry 的 `defaultConfig`
+
+所以新增一条路由时忘了加 resilience4j 配置，结果是套用项目默认值，而不是无保护地裸奔。
+
+**关键在于项目默认值必须是对网关安全的**，这正是不能沿用库默认值的原因：限流的库默认 `timeout-duration` 是 5 秒（阻塞事件循环），超时的库默认是 1 秒（静默截断所有请求）。项目默认分别是 `0` 和 `5s`。`ResilienceDefaultConfigTest` 和 `UnconfiguredInstanceRouteTest` 就是盯着这两条的。
+
+往 `instances` 里加实例时，只写**要偏离默认值**的项。把默认值原样抄一遍会让 `configs.default` 形同虚设——改默认值不再影响任何实例，是最容易腐化的一种写法。
+
+代价：加了默认值之后，装配期的 `timeout-duration` 校验不再能兜住「实例名拼错」（以前写错会落到库默认的 5s 而启动失败，现在静默套用默认配额）。这是「漏配也要有保护」必然的取舍。补偿手段是限流过滤器装配时会打印实际生效的实例名与配额，启动日志里可核对：
+
+```
+INFO ... Resilience4jRateLimiter [bootDemoRateLimiter] 已装配，配额 [50] 次 / [PT1S]
+```
+
+### 降级响应
+
+熔断和限流是两条不同的拦截路径——熔断由内置过滤器 `forward:/fallback/boot-demo` 到 `FallbackController`，限流由自己的过滤器直接写响应——但响应体结构必须一致，所以都走 `DegradeResponseWriter`。结构是 `{reason, message, traceId}`，熔断 `503`、限流 `429`，靠 `reason` 区分（熔断的 503 和「下游无可用实例」的 503 状态码相同）。traceId 从 exchange 的请求头取而不是 MDC：`TraceFilter` 排在 `HIGHEST_PRECEDENCE`，到这里时头已经写好了，比依赖 Reactor 上下文传播在当前线程还原 MDC 可靠。
+
+降级路径放在 `/fallback/**`，**不能**落在 `/proxy/**` 下，否则会被代理路由再匹配一次形成回环。
+
+### 又一次 Nacos 覆盖提醒
+
+这些过滤器是挂在路由定义上的。Nacos 上只要有 `...webflux.routes`，整条路由连同熔断限流会被一起顶掉，**而且没有任何报错**——看起来一切正常，实际裸奔。比单纯路由失效更危险。
+
 ## 约定
 
 - 以 `.editorconfig` 为准：UTF-8、LF、4 空格缩进、文件末尾留空行、清除行尾空格；Java 行宽上限 120；YAML 用 2 空格；`.bat`/`.cmd` 保持 CRLF；Markdown 用 tab 缩进且保留行尾空格。注意 `build.gradle` 自身是 tab 缩进的 —— 编辑时跟随所在文件的风格。

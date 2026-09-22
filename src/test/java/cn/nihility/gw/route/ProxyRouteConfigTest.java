@@ -1,6 +1,7 @@
 package cn.nihility.gw.route;
 
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,6 +12,7 @@ import org.springframework.cloud.gateway.handler.predicate.PredicateDefinition;
 import org.springframework.cloud.gateway.route.RouteDefinition;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -54,18 +56,56 @@ class ProxyRouteConfigTest {
         assertTrue(path.getArgs().containsValue("/proxy/**"), "实际谓词参数: " + path.getArgs());
     }
 
-    /** 过滤器顺序与内容：先剥掉 /proxy 前缀，再保留调用方原始 Host 头。 */
+    /**
+     * 过滤器的数量与顺序。
+     *
+     * <p>顺序本身就是设计决定：限流排在熔断之前，超配额的请求根本没调用下游，不应该污染熔断的
+     * 失败率样本；反过来排会让一次限流风暴把熔断也带开。所以这里断言的是下标，不是「包含」。</p>
+     */
+    @Test
+    void shouldApplyFiltersInResilienceFirstOrder() {
+        List<FilterDefinition> filters = findProxyRoute().getFilters();
+
+        assertEquals(4, filters.size(), "代理路由应有 4 个过滤器，实际: " + filters);
+        assertEquals("Resilience4jRateLimiter", filters.get(0).getName(), "限流必须排在最前");
+        assertEquals("CircuitBreaker", filters.get(1).getName(), "熔断必须排在限流之后、转发改写之前");
+        assertEquals("StripPrefix", filters.get(2).getName());
+        assertEquals("PreserveHostHeader", filters.get(3).getName());
+    }
+
+    /** 限流过滤器指向 resilience4j 中配置的 RateLimiter 实例。 */
+    @Test
+    void shouldBindRateLimiterInstanceName() {
+        FilterDefinition rateLimiter = findProxyRoute().getFilters().get(0);
+
+        // 简写形式的参数键是 Gateway 生成的 _genkey_0，这里只断言值，避免耦合内部命名
+        assertTrue(rateLimiter.getArgs().containsValue("bootDemoRateLimiter"),
+                "实际参数: " + rateLimiter.getArgs());
+    }
+
+    /** 熔断过滤器的实例名、降级地址与失败状态码。 */
+    @Test
+    void shouldBindCircuitBreakerArgs() {
+        Map<String, String> args = findProxyRoute().getFilters().get(1).getArgs();
+
+        assertEquals("bootDemoCircuitBreaker", args.get("name"));
+        assertEquals("forward:/fallback/boot-demo", args.get("fallbackUri"));
+        // 不显式列出状态码的话，下游返回的 5xx 不会计入失败率，只有异常才算
+        assertEquals("500,502,503,504", args.get("statusCodes"));
+        // 降级地址不能落在 /proxy 下，否则会被代理路由再匹配一次形成回环
+        assertFalse(args.get("fallbackUri").contains("/proxy"), "降级地址不能落在代理路由的匹配范围内");
+    }
+
+    /** 转发改写：剥掉 /proxy 前缀，保留调用方原始 Host 头。 */
     @Test
     void shouldStripPrefixAndPreserveHostHeader() {
         List<FilterDefinition> filters = findProxyRoute().getFilters();
 
-        assertEquals(2, filters.size(), "代理路由应只有 StripPrefix 和 PreserveHostHeader 两个过滤器");
-
-        FilterDefinition stripPrefix = filters.get(0);
+        FilterDefinition stripPrefix = filters.get(2);
         assertEquals("StripPrefix", stripPrefix.getName());
         assertTrue(stripPrefix.getArgs().containsValue("1"), "实际参数: " + stripPrefix.getArgs());
 
-        FilterDefinition preserveHost = filters.get(1);
+        FilterDefinition preserveHost = filters.get(3);
         assertEquals("PreserveHostHeader", preserveHost.getName());
         assertTrue(preserveHost.getArgs().isEmpty(), "PreserveHostHeader 不接受参数");
     }

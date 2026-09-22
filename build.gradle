@@ -30,13 +30,17 @@ configurations.configureEach {
 
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-webflux'
-    //implementation 'org.springframework.cloud:spring-cloud-starter-gateway:3.1.10'
-    implementation 'org.springframework.cloud:spring-cloud-starter-gateway-server-webflux:4.3.4'
+    implementation 'org.springframework.cloud:spring-cloud-starter-gateway-server-webflux'
 
     /* Feign底层用HttpClient替代默认的HttpURLConnection，支持连接池，性能更好 */
     implementation 'io.github.openfeign:feign-hc5:13.9.2'
     implementation 'org.springframework.cloud:spring-cloud-starter-openfeign'
     implementation 'org.springframework.cloud:spring-cloud-starter-loadbalancer'
+
+    implementation 'com.github.ben-manes.caffeine:caffeine:3.2.4'
+    /* 熔断与限流的实现。版本不要显式写：spring-cloud-dependencies BOM 会覆盖它
+       (声明 5.0.2 实际解析到 3.3.3，resilience4j 核心库 2.2.0)，写死只会误导 */
+    implementation 'org.springframework.cloud:spring-cloud-starter-circuitbreaker-reactor-resilience4j'
 
     /* Reactor 与 ThreadLocal(MDC) 的上下文桥接，WebFlux 下跨线程传递 traceId 必需 */
     implementation 'io.micrometer:context-propagation'
