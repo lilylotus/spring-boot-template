@@ -10,6 +10,12 @@ import java.util.Objects;
  */
 public record RpcError(RpcErrorCode code, String message) {
 
+    /**
+     * 校验错误类型与说明均已填写。
+     *
+     * @throws NullPointerException 错误类型为空时抛出
+     * @throws IllegalArgumentException 错误说明为空或全空白时抛出
+     */
     public RpcError {
         Objects.requireNonNull(code, "错误类型不能为空");
         if (message == null || message.isBlank()) {

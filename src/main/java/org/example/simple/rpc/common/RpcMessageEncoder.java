@@ -19,6 +19,14 @@ public final class RpcMessageEncoder extends MessageToByteEncoder<RpcFrame> {
         this.maxBodyLength = maxBodyLength;
     }
 
+    /**
+     * 按固定头格式写出一帧：魔数、版本、消息类型、序列化标识、请求编号、体长度、消息体。
+     *
+     * @param context 通道处理上下文
+     * @param frame 已完成业务序列化的消息帧
+     * @param output 出站字节缓冲
+     * @throws TooLongFrameException 当消息体超过上限时抛出，避免把超大帧发往对端
+     */
     @Override
     protected void encode(ChannelHandlerContext context, RpcFrame frame, ByteBuf output) {
         if (frame.body().length > maxBodyLength) {
