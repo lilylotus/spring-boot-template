@@ -41,3 +41,21 @@ spring:
             read-timeout: 5000
             # 需要打印 Feign 请求明细时，把对应 client 接口的日志级别调到 DEBUG 才会生效
             logger-level: basic
+    gateway:
+      server:
+        # Spring Cloud Gateway 4.3 起配置前缀迁移到 server.webflux，旧的 spring.cloud.gateway.routes 已废弃
+        webflux:
+          routes:
+            # 统一反向代理入口：/proxy/** 全部转发到 Nacos 上的 BootDemo 服务
+            # 注意：spring.config.import 引入的 Nacos 配置优先级高于本地 application.yaml，
+            #      且 YAML List 属性不会合并，Nacos 侧若也定义了 routes，这里整段会被覆盖
+            - id: proxy-boot-demo
+              # lb:// 走 Nacos 服务发现 + spring-cloud-loadbalancer，不硬编码实例地址
+              uri: lb://BootDemo
+              predicates:
+                - Path=/proxy/**
+              filters:
+                # 转发前剥掉第一段路径 /proxy，下游收到的是不带前缀的业务路径
+                - StripPrefix=1
+                # 保留调用方原始 Host 头，不替换成被选中实例的 host:port
+                - PreserveHostHeader
