@@ -103,7 +103,7 @@ public final class ExcelUtils {
         ExcelObjectMapper<T> mapper = ExcelObjectMapper.of(type);
         mapper.requireImportConstructor();
         XlsxSaxReader.read(input, options, new XlsxSaxReader.RowConsumer() {
-            /** 在读取数据行前校验对象声明的必填标题。 */
+            /** 在读取数据行前校验标题数量和列顺序与对象声明完全一致。 */
             @Override
             public void headers(List<String> headers, String sheetName) {
                 mapper.validateHeaders(headers, sheetName);

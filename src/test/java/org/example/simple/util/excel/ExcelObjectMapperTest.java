@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** XLSX 对象元数据、继承字段和内置类型转换测试。 */
 class ExcelObjectMapperTest {
@@ -80,6 +81,55 @@ class ExcelObjectMapperTest {
     }
 
     @Test
+    void rejectsHeaderCountsAndIndexesThatDifferFromDeclarations() {
+        ExcelObjectMapper<OrderedChildRow> mapper = ExcelObjectMapper.of(OrderedChildRow.class);
+        String sheetName = "数据表";
+
+        ExcelProcessingException missing = assertThrows(
+            ExcelProcessingException.class,
+            () -> mapper.validateHeaders(List.of("子级显式", "父级显式", "父级默认"), sheetName));
+        assertEquals(ExcelErrorType.MAPPING, missing.getErrorType());
+        assertEquals(sheetName, missing.getSheetName());
+        assertTrue(missing.getMessage().contains("期望列数=4"));
+        assertTrue(missing.getMessage().contains("实际列数=3"));
+
+        ExcelProcessingException extra = assertThrows(
+            ExcelProcessingException.class,
+            () -> mapper.validateHeaders(
+                List.of("子级显式", "父级显式", "父级默认", "子级默认", "额外列"), sheetName));
+        assertEquals(ExcelErrorType.MAPPING, extra.getErrorType());
+        assertTrue(extra.getMessage().contains("期望列数=4"));
+        assertTrue(extra.getMessage().contains("实际列数=5"));
+
+        ExcelProcessingException reordered = assertThrows(
+            ExcelProcessingException.class,
+            () -> mapper.validateHeaders(
+                List.of("父级显式", "子级显式", "父级默认", "子级默认"), sheetName));
+        assertEquals(ExcelErrorType.MAPPING, reordered.getErrorType());
+        assertEquals(sheetName, reordered.getSheetName());
+        assertEquals(1, reordered.getColumnNumber());
+        assertEquals("父级显式", reordered.getHeader());
+        assertEquals("childOrdered", reordered.getFieldName());
+        assertTrue(reordered.getMessage().contains("期望标题=子级显式"));
+        assertTrue(reordered.getMessage().contains("实际标题=父级显式"));
+    }
+
+    @Test
+    void importsWhenHeadersMatchExplicitImplicitAndInheritedOrder() throws Exception {
+        byte[] bytes = createTextWorkbook(
+            List.of("子级显式", "父级显式", "父级默认", "子级默认"),
+            List.of("子级显式值", "父级显式值", "父级默认值", "子级默认值"));
+
+        OrderedChildRow actual = ExcelUtils.readObjectList(
+            new ByteArrayInputStream(bytes), OrderedChildRow.class).getFirst();
+
+        assertEquals("子级显式值", actual.childOrdered);
+        assertEquals("父级显式值", ((OrderedParentRow) actual).parentOrdered);
+        assertEquals("父级默认值", ((OrderedParentRow) actual).parentDefault);
+        assertEquals("子级默认值", actual.childDefault);
+    }
+
+    @Test
     void rejectsNumericRangeOverflow() throws Exception {
         byte[] bytes;
         try (XSSFWorkbook workbook = new XSSFWorkbook();
@@ -120,11 +170,19 @@ class ExcelObjectMapperTest {
     }
 
     private static byte[] createTextWorkbook(String header, String value) throws Exception {
+        return createTextWorkbook(List.of(header), List.of(value));
+    }
+
+    private static byte[] createTextWorkbook(List<String> headers, List<String> values) throws Exception {
         try (XSSFWorkbook workbook = new XSSFWorkbook();
              ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             var sheet = workbook.createSheet();
-            sheet.createRow(0).createCell(0).setCellValue(header);
-            sheet.createRow(1).createCell(0).setCellValue(value);
+            var headerRow = sheet.createRow(0);
+            var dataRow = sheet.createRow(1);
+            for (int index = 0; index < headers.size(); index++) {
+                headerRow.createCell(index).setCellValue(headers.get(index));
+                dataRow.createCell(index).setCellValue(values.get(index));
+            }
             workbook.write(output);
             return output.toByteArray();
         }
@@ -209,5 +267,21 @@ class ExcelObjectMapperTest {
     static final class ByteOnlyRow {
         @ExcelColumn("字节")
         private byte value;
+    }
+
+    /** 标题顺序测试父类，包含显式顺序和默认顺序字段。 */
+    static class OrderedParentRow {
+        @ExcelColumn(value = "父级显式", order = 10)
+        private String parentOrdered;
+        @ExcelColumn("父级默认")
+        private String parentDefault;
+    }
+
+    /** 标题顺序测试子类，用于验证显式、默认和继承字段的组合排序。 */
+    static final class OrderedChildRow extends OrderedParentRow {
+        @ExcelColumn(value = "子级显式", order = 1)
+        private String childOrdered;
+        @ExcelColumn("子级默认")
+        private String childDefault;
     }
 }

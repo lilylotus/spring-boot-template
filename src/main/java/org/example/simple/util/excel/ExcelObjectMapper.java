@@ -150,15 +150,40 @@ final class ExcelObjectMapper<T> {
         return target;
     }
 
-    /** 校验当前标题集合包含对象声明的全部必填列。 */
+    /**
+     * 校验标题数量和每个列索引均与排序后的对象列声明一致。
+     *
+     * @param headers 已标准化且顺序稳定的标题列表
+     * @param sheetName 当前工作表名称
+     * @throws ExcelProcessingException 标题数量或任一列标题与对象声明不一致时抛出
+     */
     void validateHeaders(List<String> headers, String sheetName) {
-        Set<String> available = new HashSet<>(headers);
-        for (ColumnBinding column : columns) {
-            if (column.required() && !available.contains(column.header())) {
+        if (headers.size() != columns.size()) {
+            throw new ExcelProcessingException(
+                ExcelErrorType.MAPPING,
+                "标题列数量与对象声明不一致，工作表=" + sheetName + "，期望列数=" + columns.size()
+                    + "，实际列数=" + headers.size(),
+                null,
+                sheetName,
+                null,
+                null,
+                null,
+                null);
+        }
+        for (int index = 0; index < columns.size(); index++) {
+            ColumnBinding column = columns.get(index);
+            String actualHeader = headers.get(index);
+            if (!column.header().equals(actualHeader)) {
                 throw new ExcelProcessingException(
                     ExcelErrorType.MAPPING,
-                    "缺少必填标题，工作表=" + sheetName + "，标题=" + column.header()
-                        + "，字段=" + column.field().getName());
+                    "标题列与对象声明不一致，工作表=" + sheetName + "，列=" + (index + 1)
+                        + "，期望标题=" + column.header() + "，实际标题=" + actualHeader,
+                    null,
+                    sheetName,
+                    null,
+                    index + 1,
+                    actualHeader,
+                    column.field().getName());
             }
         }
     }
