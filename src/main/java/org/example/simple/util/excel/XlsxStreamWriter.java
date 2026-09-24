@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.SequencedMap;
 import java.util.Set;
 
 import org.apache.poi.ss.usermodel.Cell;
@@ -58,18 +59,19 @@ final class XlsxStreamWriter {
      */
     static void writeMaps(
         OutputStream output,
-        Iterable<? extends LinkedHashMap<String, ?>> data,
+        Iterable<? extends Map<String, ?>> data,
         LinkedHashMap<String, String> explicitColumns,
         ExcelWriteOptions options) {
-        Iterator<? extends LinkedHashMap<String, ?>> iterator = data.iterator();
-        LinkedHashMap<String, ?> first = iterator.hasNext() ? requireMap(iterator.next()) : null;
+        Iterator<? extends Map<String, ?>> iterator = data.iterator();
+        Map<String, ?> first = iterator.hasNext() ? requireMap(iterator.next()) : null;
         LinkedHashMap<String, String> columns = explicitColumns == null
             ? inferColumns(first)
             : validateColumns(explicitColumns);
         List<String> keys = List.copyOf(columns.keySet());
+        Set<String> keySet = Set.copyOf(keys);
         List<String> headers = List.copyOf(columns.values());
-        Iterator<LinkedHashMap<String, ?>> combined = prepend(first, iterator);
-        write(output, combined, headers, value -> mapValues(value, keys), options);
+        Iterator<Map<String, ?>> combined = prepend(first, iterator);
+        write(output, combined, headers, value -> mapValues(value, keys, keySet), options);
     }
 
     /**
@@ -268,9 +270,9 @@ final class XlsxStreamWriter {
     }
 
     /** 按固定键顺序生成 Map 行值，并拒绝未定义键以防静默丢列。 */
-    private static List<CellOutput> mapValues(LinkedHashMap<String, ?> map, List<String> keys) {
+    private static List<CellOutput> mapValues(Map<String, ?> map, List<String> keys, Set<String> keySet) {
         for (String key : map.keySet()) {
-            if (!keys.contains(key)) {
+            if (!keySet.contains(key)) {
                 throw new ExcelProcessingException(ExcelErrorType.MAPPING, "Map 包含未定义的键：" + key);
             }
         }
@@ -282,9 +284,14 @@ final class XlsxStreamWriter {
     }
 
     /** 从首行键和值相同的标题定义中推断稳定列顺序。 */
-    private static LinkedHashMap<String, String> inferColumns(LinkedHashMap<String, ?> first) {
+    private static LinkedHashMap<String, String> inferColumns(Map<String, ?> first) {
         LinkedHashMap<String, String> result = new LinkedHashMap<>();
         if (first != null) {
+            if (!(first instanceof SequencedMap<?, ?>)) {
+                throw new ExcelProcessingException(
+                    ExcelErrorType.MAPPING,
+                    "无法从不保证迭代顺序的 Map 推断导出列，请提供显式有序列定义");
+            }
             for (String key : first.keySet()) {
                 result.put(key, key);
             }
@@ -311,8 +318,8 @@ final class XlsxStreamWriter {
         return result;
     }
 
-    /** 确认 Map 数据行非空并保留其插入顺序。 */
-    private static LinkedHashMap<String, ?> requireMap(LinkedHashMap<String, ?> map) {
+    /** 确认 Map 数据行非空。 */
+    private static Map<String, ?> requireMap(Map<String, ?> map) {
         if (map == null) {
             throw new ExcelProcessingException(ExcelErrorType.MAPPING, "Map 导出数据行不能为 null");
         }
@@ -322,9 +329,9 @@ final class XlsxStreamWriter {
     /**
      * 将为推断列而预读的首行重新拼接到剩余迭代器前，不复制后续数据。
      */
-    private static Iterator<LinkedHashMap<String, ?>> prepend(
-        LinkedHashMap<String, ?> first,
-        Iterator<? extends LinkedHashMap<String, ?>> rest) {
+    private static Iterator<Map<String, ?>> prepend(
+        Map<String, ?> first,
+        Iterator<? extends Map<String, ?>> rest) {
         return new Iterator<>() {
             /** 首行尚未返回时为 {@code true}。 */
             private boolean firstPending = first != null;
@@ -337,7 +344,7 @@ final class XlsxStreamWriter {
 
             /** 优先返回预读首行，随后委托给原始迭代器。 */
             @Override
-            public LinkedHashMap<String, ?> next() {
+            public Map<String, ?> next() {
                 if (firstPending) {
                     firstPending = false;
                     return first;

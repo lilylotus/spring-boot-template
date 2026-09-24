@@ -1,14 +1,23 @@
 package org.example.simple.util.excel;
 
-import java.io.*;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.FilterInputStream;
+import java.io.FilterOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.poi.hssf.usermodel.HSSFWorkbook;
@@ -238,6 +247,62 @@ class ExcelUtilsTest {
     }
 
     @Test
+    void writesUnorderedMapsWithExplicitColumnsAndRejectsColumnInference() throws Exception {
+        Map<String, Object> row = new HashMap<>();
+        row.put("name", "名称");
+        row.put("code", "A-01");
+        LinkedHashMap<String, String> columns = new LinkedHashMap<>();
+        columns.put("code", "编码");
+        columns.put("name", "名称");
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ExcelUtils.writeMaps(output, List.of(row), columns, ExcelWriteOptions.defaults());
+        try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(output.toByteArray()))) {
+            assertEquals("编码", workbook.getSheetAt(0).getRow(0).getCell(0).getStringCellValue());
+            assertEquals("A-01", workbook.getSheetAt(0).getRow(1).getCell(0).getStringCellValue());
+            assertEquals("名称", workbook.getSheetAt(0).getRow(1).getCell(1).getStringCellValue());
+        }
+
+        ExcelProcessingException exception = assertThrows(
+            ExcelProcessingException.class,
+            () -> ExcelUtils.writeMaps(new ByteArrayOutputStream(), List.of(row)));
+        assertEquals(ExcelErrorType.MAPPING, exception.getErrorType());
+        assertTrue(exception.getMessage().contains("显式有序列定义"));
+    }
+
+    @Test
+    void consumesStreamingMapRowsLazily() throws Exception {
+        AtomicInteger consumed = new AtomicInteger();
+        Iterable<Map<String, ?>> rows = () -> new Iterator<>() {
+            private int index;
+
+            @Override
+            public boolean hasNext() {
+                return index < 3;
+            }
+
+            @Override
+            public Map<String, ?> next() {
+                if (!hasNext()) {
+                    throw new NoSuchElementException();
+                }
+                LinkedHashMap<String, Object> row = new LinkedHashMap<>();
+                row.put("index", index++);
+                consumed.incrementAndGet();
+                return row;
+            }
+        };
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        assertEquals(0, consumed.get());
+        ExcelUtils.writeMapsStreaming(output, rows);
+        assertEquals(3, consumed.get());
+        try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(output.toByteArray()))) {
+            assertEquals(4, workbook.getSheetAt(0).getPhysicalNumberOfRows());
+        }
+    }
+
+    @Test
     void readsSelectedSheetAndCustomDataRegion() throws Exception {
         byte[] bytes;
         try (XSSFWorkbook workbook = new XSSFWorkbook();
@@ -394,7 +459,7 @@ class ExcelUtilsTest {
                     null,
                     sheetLimit)).getErrorType());
 
-        List<LinkedHashMap<String, ?>> manyRows = new ArrayList<>();
+        List<Map<String, Object>> manyRows = new ArrayList<>();
         for (int index = 0; index < 500; index++) {
             manyRows.add(singleMap("临时数据-" + index));
         }
@@ -472,7 +537,7 @@ class ExcelUtilsTest {
 
     @Test
     void splitsSheetsAndRejectsUnknownMapKeys() throws Exception {
-        List<LinkedHashMap<String, ?>> values = new ArrayList<>();
+        List<Map<String, Object>> values = new ArrayList<>();
         for (int index = 0; index < 5; index++) {
             LinkedHashMap<String, Object> row = new LinkedHashMap<>();
             row.put("index", index);

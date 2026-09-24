@@ -10,6 +10,8 @@ import java.lang.annotation.Target;
  * <p>
  * 注解仅作用于实例字段。静态字段、瞬态字段和未标注字段不会参与导入导出。
  * 导入要求标题数量和列顺序与声明一致，导入导出均按照 {@link #order()} 和字段声明顺序稳定排序。
+ * 对象导入重载使用本注解完成映射；仅接收运行时列配置的 Map 导入重载与本注解相互独立，
+ * 不会覆盖或合并对象字段声明。
  */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.FIELD)
