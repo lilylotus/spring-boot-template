@@ -51,7 +51,7 @@ public final class ExcelMemoryProbe {
                 ExcelWriteOptions options = ExcelWriteOptions.builder()
                     .maxCells(WRITE_ROWS)
                     .build();
-                ExcelUtils.writeMaps(stream, lazyRows(WRITE_ROWS), null, options);
+                ExcelUtils.writeMapsStreaming(stream, lazyRows(WRITE_ROWS), null, options);
             }
             if (Files.size(output) == 0) {
                 throw new AssertionError("流式导出文件为空");
