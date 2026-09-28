@@ -9,4 +9,4 @@
 ## 2. 回归验证
 
 - [x] 2.1 补充标题与声明完全一致时成功导入的测试，覆盖显式 `order`、未显式 `order` 及继承字段排序，验证现有对象转换结果保持不变。
-- [ ] 2.2 运行 `gradlew.bat test` 和 `openspec validate enforce-xlsx-header-order --strict`，确认全部测试和 OpenSpec 严格校验通过。
+- [x] 2.2 运行 `gradlew.bat test` 和 `openspec validate enforce-xlsx-header-order --strict`，确认全部测试和 OpenSpec 严格校验通过。
