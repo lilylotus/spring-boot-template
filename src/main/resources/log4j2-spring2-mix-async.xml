@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  混合异步版本：仅业务/兜底 Logger 走异步（AsyncLogger/AsyncRoot），
+  框架、三方库日志（Spring、MyBatis 等）保持同步，审计类日志按需单独走同步。
+
+  重要：本文件走"混合异步"方案，不需要配置 log4j2.component.properties 里的
+  log4j2.contextSelector=AsyncLoggerContextSelector。
+  如果项目里已经配置了该系统属性/properties 文件，会导致所有 Logger 全局异步化，
+  与本文件里 <AsyncLogger> 和普通 <Logger> 的区分失去意义，请二选一，不要混用。
+
+  依赖要求：仍需引入 com.lmax:disruptor，否则 <AsyncLogger>/<AsyncRoot> 无法生效。
+
+  status: log4j2 自身运行日志级别，排查配置问题时可改成 debug
+  monitorInterval: 每隔多少秒自动检测本文件变化并热加载（秒）
+-->
+<Configuration status="WARN" monitorInterval="60">
+
+    <Properties>
+        <!-- 应用名，用于日志文件名前缀，按需修改 -->
+        <Property name="APP_NAME">myapp</Property>
+        <!-- 日志根目录，按需修改为实际路径 -->
+        <Property name="LOG_HOME">/data/logs/${APP_NAME}</Property>
+        <!-- 控制台输出格式 -->
+        <Property name="CONSOLE_LOG_PATTERN">
+            %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n
+        </Property>
+        <!-- 文件输出格式（带 traceId 时可加 %X{traceId}） -->
+        <Property name="FILE_LOG_PATTERN">
+            %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} %X{traceId} - %msg%n
+        </Property>
+    </Properties>
+
+    <Appenders>
+
+        <!-- 控制台输出，本地开发查看用 -->
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="${CONSOLE_LOG_PATTERN}"/>
+        </Console>
+
+        <!-- 全量日志：按天滚动 + 单文件 500MB 触发滚动 -->
+        <RollingFile name="RollingFileAll"
+                     fileName="${LOG_HOME}/${APP_NAME}.log"
+                     filePattern="${LOG_HOME}/history/${APP_NAME}-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="${FILE_LOG_PATTERN}"/>
+            <Policies>
+                <!-- 每天 0 点触发一次滚动 -->
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+                <!-- 单个文件达到 500MB 触发滚动 -->
+                <SizeBasedTriggeringPolicy size="500MB"/>
+            </Policies>
+            <!--
+              max：同一天(%i)最多保留的文件序号，即每天最多 10 个文件
+              fileIndex="min"：序号从 1 开始递增，旧文件序号小，便于按天+序号定位
+            -->
+            <DefaultRolloverStrategy max="10" fileIndex="min">
+                <Delete basePath="${LOG_HOME}/history" maxDepth="1">
+                    <!-- 保留 15 天 -->
+                    <IfLastModified age="15d"/>
+                    <!-- 所有归档文件总大小超过 10GB 时，从最旧的开始删除，直到满足条件 -->
+                    <IfAccumulatedFileSize exceeds="10GB"/>
+                </Delete>
+            </DefaultRolloverStrategy>
+        </RollingFile>
+
+        <!-- 错误日志：单独归档，方便快速定位问题；同样按天+大小滚动 -->
+        <RollingFile name="RollingFileError"
+                     fileName="${LOG_HOME}/${APP_NAME}-error.log"
+                     filePattern="${LOG_HOME}/history/${APP_NAME}-error-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="${FILE_LOG_PATTERN}"/>
+            <ThresholdFilter level="ERROR" onMatch="ACCEPT" onMismatch="DENY"/>
+            <Policies>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+                <SizeBasedTriggeringPolicy size="500MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="10" fileIndex="min">
+                <Delete basePath="${LOG_HOME}/history" maxDepth="1">
+                    <IfFileName glob="${APP_NAME}-error-*.log.gz"/>
+                    <IfLastModified age="15d"/>
+                    <IfAccumulatedFileSize exceeds="10GB"/>
+                </Delete>
+            </DefaultRolloverStrategy>
+        </RollingFile>
+
+        <!-- 审计日志：独立文件，要求写入后立即可查，走同步 Logger，不异步 -->
+        <RollingFile name="RollingFileAudit"
+                     fileName="${LOG_HOME}/${APP_NAME}-audit.log"
+                     filePattern="${LOG_HOME}/history/${APP_NAME}-audit-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="${FILE_LOG_PATTERN}"/>
+            <Policies>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+                <SizeBasedTriggeringPolicy size="500MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="10" fileIndex="min">
+                <Delete basePath="${LOG_HOME}/history" maxDepth="1">
+                    <IfFileName glob="${APP_NAME}-audit-*.log.gz"/>
+                    <IfLastModified age="15d"/>
+                    <IfAccumulatedFileSize exceeds="10GB"/>
+                </Delete>
+            </DefaultRolloverStrategy>
+        </RollingFile>
+
+    </Appenders>
+
+    <Loggers>
+
+        <!--
+          业务包日志：异步（AsyncLogger），按需修改为实际根包名
+          includeLocation="false"：异步场景下必须关闭位置信息采集，
+          否则栈追踪开销会抵消异步带来的性能收益
+        -->
+        <AsyncLogger name="com.example" level="INFO" additivity="false" includeLocation="false">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="RollingFileAll"/>
+            <AppenderRef ref="RollingFileError"/>
+        </AsyncLogger>
+
+        <!--
+          审计日志：同步（普通 Logger），要求写入后立即落盘、立即可查，
+          不使用 AsyncLogger，独立走 RollingFileAudit
+        -->
+        <Logger name="com.example.audit" level="INFO" additivity="false">
+            <AppenderRef ref="RollingFileAudit"/>
+        </Logger>
+
+        <!-- Spring 框架日志：保持同步（默认行为），避免过多 DEBUG 刷屏 -->
+        <Logger name="org.springframework" level="INFO" additivity="false">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="RollingFileAll"/>
+        </Logger>
+
+        <!-- MyBatis / SQL 日志：保持同步，需要看 SQL 时可调成 DEBUG -->
+        <Logger name="org.mybatis" level="INFO" additivity="false">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="RollingFileAll"/>
+        </Logger>
+
+        <!--
+          根日志：兜底也走异步（AsyncRoot），捕获所有未单独配置的包。
+          如果希望未知来源日志走同步兜底，把 <AsyncRoot> 换成普通 <Root> 即可。
+        -->
+        <AsyncRoot level="INFO" includeLocation="false">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="RollingFileAll"/>
+            <AppenderRef ref="RollingFileError"/>
+        </AsyncRoot>
+
+    </Loggers>
+
+</Configuration>

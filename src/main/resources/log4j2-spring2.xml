@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  status: log4j2 自身运行日志级别，排查配置问题时可改成 debug
+  monitorInterval: 每隔多少秒自动检测本文件变化并热加载（秒）
+-->
+<Configuration status="WARN" monitorInterval="60">
+
+    <Properties>
+        <!-- 应用名，用于日志文件名前缀，按需修改 -->
+        <Property name="APP_NAME">myapp</Property>
+        <!-- 日志根目录，按需修改为实际路径 -->
+        <Property name="LOG_HOME">/data/logs/${APP_NAME}</Property>
+        <!-- 控制台输出格式 -->
+        <Property name="CONSOLE_LOG_PATTERN">
+            %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n
+        </Property>
+        <!-- 文件输出格式（带 traceId 时可加 %X{traceId}） -->
+        <Property name="FILE_LOG_PATTERN">
+            %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} %X{traceId} - %msg%n
+        </Property>
+    </Properties>
+
+    <Appenders>
+
+        <!-- 控制台输出，本地开发查看用 -->
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="${CONSOLE_LOG_PATTERN}"/>
+        </Console>
+
+        <!-- 全量日志：按天滚动 + 单文件 500MB 触发滚动 -->
+        <RollingFile name="RollingFileAll"
+                     fileName="${LOG_HOME}/${APP_NAME}.log"
+                     filePattern="${LOG_HOME}/history/${APP_NAME}-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="${FILE_LOG_PATTERN}"/>
+            <Policies>
+                <!-- 每天 0 点触发一次滚动 -->
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+                <!-- 单个文件达到 500MB 触发滚动 -->
+                <SizeBasedTriggeringPolicy size="500MB"/>
+            </Policies>
+            <!--
+              max：同一天(%i)最多保留的文件序号，即每天最多 10 个文件
+              fileIndex="min"：序号从 1 开始递增，旧文件序号小，便于按天+序号定位
+            -->
+            <DefaultRolloverStrategy max="10" fileIndex="min">
+                <!--
+                  maxDepth="1" 表示：只扫描 basePath 目录本身这一层的文件，不进入更深的子目录。
+                  Log4j2 的 Delete 底层用的是 Java NIO 的 Files.walkFileTree，深度的计算方式是：
+                  0	只检查 basePath 这个目录本身（不含其中文件）
+                  1	basePath 目录下的直接文件（这是最常用的值）
+                  2	basePath 下一级子目录里的文件
+                  对应 ${LOG_HOME}/history/${APP_NAME}-2026-09-29-1.log.gz
+                  因为所有归档文件都直接平铺在 history/ 目录下，没有再分子目录，
+                  所以 maxDepth="1" 正好能扫到这些文件（history 是第 0 层，其中的文件是第 1 层）。
+                -->
+                <Delete basePath="${LOG_HOME}/history" maxDepth="1">
+                    <!-- 保留 15 天 -->
+                    <IfLastModified age="15d"/>
+                    <!-- 所有归档文件总大小超过 10GB 时，从最旧的开始删除，直到满足条件 -->
+                    <IfAccumulatedFileSize exceeds="10GB"/>
+                </Delete>
+            </DefaultRolloverStrategy>
+        </RollingFile>
+
+        <!-- 错误日志：单独归档，方便快速定位问题；同样按天+大小滚动 -->
+        <RollingFile name="RollingFileError"
+                     fileName="${LOG_HOME}/${APP_NAME}-error.log"
+                     filePattern="${LOG_HOME}/history/${APP_NAME}-error-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="${FILE_LOG_PATTERN}"/>
+            <ThresholdFilter level="ERROR" onMatch="ACCEPT" onMismatch="DENY"/>
+            <Policies>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+                <SizeBasedTriggeringPolicy size="500MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="10" fileIndex="min">
+                <Delete basePath="${LOG_HOME}/history" maxDepth="1">
+                    <IfFileName glob="${APP_NAME}-error-*.log.gz"/>
+                    <IfLastModified age="15d"/>
+                    <IfAccumulatedFileSize exceeds="10GB"/>
+                </Delete>
+            </DefaultRolloverStrategy>
+        </RollingFile>
+
+        <!--
+          异步落盘包装：将上面的 RollingFile 包装为 Async Appender
+          blocking="false"：队列满时丢弃 DEBUG/INFO/WARN 级别日志而不阻塞业务线程，
+                            ERROR 及以上仍会阻塞等待，避免异常丢失
+          bufferSize：环形缓冲区大小，按业务日志量调整
+        -->
+        <Async name="AsyncRollingFileAll" bufferSize="8192" blocking="false">
+            <AppenderRef ref="RollingFileAll"/>
+        </Async>
+
+        <Async name="AsyncRollingFileError" bufferSize="2048" blocking="true">
+            <AppenderRef ref="RollingFileError"/>
+        </Async>
+
+    </Appenders>
+
+    <Loggers>
+
+        <!-- 业务包日志，按需修改为实际根包名 -->
+        <Logger name="com.example" level="INFO" additivity="false">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="AsyncRollingFileAll"/>
+            <AppenderRef ref="AsyncRollingFileError"/>
+        </Logger>
+
+        <!-- Spring 框架日志，避免过多 DEBUG 刷屏 -->
+        <Logger name="org.springframework" level="INFO" additivity="false">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="AsyncRollingFileAll"/>
+        </Logger>
+
+        <!-- MyBatis / SQL 日志，需要看 SQL 时可调成 DEBUG -->
+        <Logger name="org.mybatis" level="INFO" additivity="false">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="AsyncRollingFileAll"/>
+        </Logger>
+
+        <!-- 根日志：兜底，捕获所有未单独配置的包 -->
+        <Root level="INFO">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="AsyncRollingFileAll"/>
+            <AppenderRef ref="AsyncRollingFileError"/>
+        </Root>
+
+    </Loggers>
+
+</Configuration>
