@@ -16,3 +16,5 @@ HTTP 请求工具使用说明见 [HttpRequestUtils](docs/HttpRequestUtils使用�
 HTTP 响应 Cookie 写入工具使用说明见 [HttpResponseUtils](docs/HttpResponseUtils使用说明.md)。
 
 HTTP 请求签名/验签工具使用说明见 [HttpRequestSignUtils](docs/HttpRequestSignUtils使用说明.md)。
+
+IP 范围匹配工具使用说明见 [IpRangeCheckUtils](docs/IpRangeCheckUtils使用说明.md)。
