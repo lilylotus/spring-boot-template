@@ -14,3 +14,5 @@ JSON 工具使用说明见 [JacksonUtils](docs/JacksonUtils使用说明.md)。
 HTTP 请求工具使用说明见 [HttpRequestUtils](docs/HttpRequestUtils使用说明.md)。
 
 HTTP 响应 Cookie 写入工具使用说明见 [HttpResponseUtils](docs/HttpResponseUtils使用说明.md)。
+
+HTTP 请求签名/验签工具使用说明见 [HttpRequestSignUtils](docs/HttpRequestSignUtils使用说明.md)。
