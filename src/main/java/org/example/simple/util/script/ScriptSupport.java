@@ -1,4 +1,4 @@
-package org.example.simple.util;
+package org.example.simple.util.script;
 
 import java.util.LinkedHashMap;
 import java.util.Map;

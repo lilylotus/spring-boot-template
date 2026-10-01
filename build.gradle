@@ -55,6 +55,8 @@ dependencies {
     /* 二维码生成与解码 */
     implementation 'com.google.zxing:core:3.5.3'
 
+    implementation 'org.apache.tomcat.embed:tomcat-embed-core:10.1.60'
+
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation platform('org.junit:junit-bom:5.10.0')
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'

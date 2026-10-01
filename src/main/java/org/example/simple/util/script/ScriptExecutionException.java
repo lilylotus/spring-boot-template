@@ -1,4 +1,4 @@
-package org.example.simple.util;
+package org.example.simple.util.script;
 
 /**
  * 脚本初始化、编译、执行、结果转换或资源关闭失败。

@@ -3,6 +3,8 @@ package org.example.simple.util;
 import java.util.List;
 import java.util.Map;
 
+import org.example.simple.util.script.GraalVMUtils;
+import org.example.simple.util.script.ScriptExecutionException;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
