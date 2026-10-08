@@ -1,5 +1,9 @@
 package org.example.simple.http;
 
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.lang.reflect.Modifier;
 import java.net.InetSocketAddress;
@@ -155,6 +159,19 @@ class HttpClientsTest {
     }
 
     @Test
+    void testFileUpload() throws FileNotFoundException {
+        String url = "http://127.0.0.1:18888/bigfile/upload";
+        //FileInputStream fis = new FileInputStream("C:\\Users\\Administrator\\Pictures\\star-face-img5.png");
+        File filePng = new File("C:\\Users\\Administrator\\Pictures\\star-face-img5.png");
+        Path path = filePng.toPath();
+        Map<String, List<String>> param = Map.of("FLAG", List.of("HHH"));
+        List<MultipartFilePart> file = List.of(MultipartFilePart.of("FILE", path, "application/octet-stream"));
+        MultipartRequestBody body = new MultipartRequestBody(param, file);
+        HttpResponseData post = HttpClients.post(url, body);
+        System.out.println(post.bodyAsString());
+    }
+
+    @Test
     void sendsMultipartTextMultipleFilesAndBinaryFile() throws Exception {
         Path firstFile = temporaryDirectory.resolve("甲.txt");
         Path secondFile = temporaryDirectory.resolve("乙.bin");
@@ -180,6 +197,34 @@ class HttpClientsTest {
         assertTrue(multipartText.contains("文件甲"));
         EchoResponse binaryEcho = objectMapper.readValue(binaryResponse.body(), EchoResponse.class);
         assertArrayEquals(new byte[] {0, 1, 2, 3}, binaryEcho.rawBodyBytes());
+    }
+
+    @Test
+    void sendsMultipartFileFromInputStreamAndClosesItAfterward() {
+        TrackingInputStream stream = new TrackingInputStream("流内容".getBytes(StandardCharsets.UTF_8));
+        MultipartRequestBody multipart = new MultipartRequestBody(
+            Map.of(),
+            List.of(),
+            List.of(new MultipartStreamPart("file", stream, "stream.txt", "text/plain; charset=UTF-8")));
+
+        HttpResponseData response = HttpClients.post(baseUrl + "/echo", multipart);
+
+        assertTrue(response.bodyAsString().contains("流内容"));
+        assertTrue(response.bodyAsString().contains("filename=\\\"stream.txt\\\""));
+        assertTrue(stream.closed());
+    }
+
+    @Test
+    void closesStreamPartInputStreamEvenWhenRequestFails() {
+        TrackingInputStream stream = new TrackingInputStream("内容".getBytes(StandardCharsets.UTF_8));
+        MultipartRequestBody multipart = new MultipartRequestBody(
+            Map.of(),
+            List.of(),
+            List.of(new MultipartStreamPart("file", stream, "file.bin", "application/octet-stream")));
+
+        assertThrows(HttpClientException.class, () -> HttpClients.post(baseUrl + "/status", multipart));
+
+        assertTrue(stream.closed());
     }
 
     @Test
@@ -463,5 +508,27 @@ class HttpClientsTest {
      * @param name 名称
      */
     private record SamplePayload(String name) {
+    }
+
+    /**
+     * 可观测是否已关闭的输入流测试替身，用于验证 {@link HttpClients} 是否按约定关闭流文件字段的输入流。
+     */
+    private static final class TrackingInputStream extends ByteArrayInputStream {
+
+        private volatile boolean closed;
+
+        TrackingInputStream(byte[] buffer) {
+            super(buffer);
+        }
+
+        @Override
+        public void close() throws IOException {
+            closed = true;
+            super.close();
+        }
+
+        boolean closed() {
+            return closed;
+        }
     }
 }

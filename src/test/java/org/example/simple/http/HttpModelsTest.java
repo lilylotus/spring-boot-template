@@ -235,16 +235,24 @@ class HttpModelsTest {
         MultipartRequestBody multipart = new MultipartRequestBody(
             Map.of("说明", List.of("文本")),
             List.of(filePart));
+        MultipartStreamPart streamPart = new MultipartStreamPart(
+            "流文件", new java.io.ByteArrayInputStream(new byte[] {4, 5, 6}), "流.bin", "application/octet-stream");
+        MultipartRequestBody streamOnlyMultipart = new MultipartRequestBody(Map.of(), List.of(), List.of(streamPart));
         BinaryRequestBody binary = new BinaryRequestBody(file, "application/octet-stream");
 
         assertEquals(List.of("值"), form.fields().get("名称"));
         assertEquals("数据.bin", multipart.fileParts().getFirst().fileName());
+        assertTrue(multipart.streamParts().isEmpty());
+        assertEquals("流.bin", streamOnlyMultipart.streamParts().getFirst().fileName());
         assertEquals(file, binary.path());
         assertThrows(NullPointerException.class, () -> new JsonRequestBody(null));
         assertThrows(IllegalArgumentException.class, () -> FormRequestBody.of(Map.of(" ", "值")));
         assertThrows(
             IllegalArgumentException.class,
             () -> new MultipartRequestBody(Map.of(), List.of()));
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new MultipartRequestBody(Map.of(), List.of(), List.of()));
         assertThrows(
             IllegalArgumentException.class,
             () -> new BinaryRequestBody(temporaryDirectory.resolve("不存在.bin"), "application/octet-stream"));

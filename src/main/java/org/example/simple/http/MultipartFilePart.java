@@ -8,6 +8,9 @@ import org.apache.hc.core5.http.ContentType;
 
 /**
  * multipart 请求中的文件字段。
+ * <p>
+ * {@code contentType} 可以是任意合法的媒体类型字符串，也可以直接使用 {@link MultipartContentTypeEnum}
+ * 中收录的常见媒体类型，例如 {@code MultipartContentTypeEnum.OCTET_STREAM.getContentType()}。
  *
  * @param fieldName 字段名称
  * @param path 文件路径
@@ -36,6 +39,8 @@ public record MultipartFilePart(String fieldName, Path path, String fileName, St
 
     /**
      * 使用路径文件名创建 multipart 文件字段。
+     * <p>
+     * 示例：{@code MultipartFilePart.of("file", path, MultipartContentTypeEnum.OCTET_STREAM.getContentType())}。
      *
      * @param fieldName 字段名称
      * @param path 文件路径

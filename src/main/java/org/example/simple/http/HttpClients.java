@@ -1,6 +1,7 @@
 package org.example.simple.http;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -337,6 +338,24 @@ public final class HttpClients {
         }
     }
 
+    private static List<InputStream> collectStreamPartInputStreams(HttpRequestData request) {
+        return request.body()
+            .filter(MultipartRequestBody.class::isInstance)
+            .map(MultipartRequestBody.class::cast)
+            .map(body -> body.streamParts().stream().map(MultipartStreamPart::inputStream).toList())
+            .orElseGet(List::of);
+    }
+
+    private static void closeQuietly(List<InputStream> streams) {
+        for (InputStream stream : streams) {
+            try {
+                stream.close();
+            } catch (IOException ignored) {
+                // 关闭调用方提供的流失败时不覆盖原始请求结果或异常。
+            }
+        }
+    }
+
     private static HttpClientException transportFailure(IOException exception) {
         if (isTimeout(exception)) {
             return new HttpClientException(HttpErrorType.TIMEOUT, "HTTP 请求超时", exception);
@@ -374,6 +393,7 @@ public final class HttpClients {
 
         private HttpResponseData execute(HttpRequestData request) {
             HttpUriRequestBase apacheRequest = createApacheRequest(request);
+            List<InputStream> streamsToClose = collectStreamPartInputStreams(request);
             try {
                 return httpClient.execute(apacheRequest, response -> {
                     byte[] body = response.getEntity() == null
@@ -395,6 +415,8 @@ public final class HttpClients {
                 throw exception;
             } catch (IOException exception) {
                 throw transportFailure(exception);
+            } finally {
+                closeQuietly(streamsToClose);
             }
         }
 
@@ -463,6 +485,11 @@ public final class HttpClients {
                     ContentType.parse(part.contentType()),
                     part.fileName());
             });
+            body.streamParts().forEach(part -> builder.addBinaryBody(
+                part.fieldName(),
+                part.inputStream(),
+                ContentType.parse(part.contentType()),
+                part.fileName()));
             return builder.build();
         }
 
