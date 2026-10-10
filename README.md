@@ -18,3 +18,5 @@ HTTP 响应 Cookie 写入工具使用说明见 [HttpResponseUtils](docs/HttpResp
 HTTP 请求签名/验签工具使用说明见 [HttpRequestSignUtils](docs/HttpRequestSignUtils使用说明.md)。
 
 IP 范围匹配工具使用说明见 [IpRangeCheckUtils](docs/IpRangeCheckUtils使用说明.md)。
+
+身份证号校验工具使用说明见 [IdCardNoValidatorUtils](docs/IdCardNoValidatorUtils使用说明.md)。
