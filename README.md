@@ -22,3 +22,5 @@ IP 范围匹配工具使用说明见 [IpRangeCheckUtils](docs/IpRangeCheckUtils�
 身份证号校验工具使用说明见 [IdCardNoValidatorUtils](docs/IdCardNoValidatorUtils使用说明.md)。
 
 随机用户信息生成工具使用说明见 [RandomUserInfoUtils](docs/RandomUserInfoUtils使用说明.md)。
+
+常用排序算法工具使用说明见 [NormalSortUtils](docs/NormalSortUtils使用说明.md)。
