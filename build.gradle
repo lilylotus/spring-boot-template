@@ -82,6 +82,15 @@ tasks.register('xlsxMemoryTest', JavaExec) {
 
 check.dependsOn tasks.named('xlsxMemoryTest')
 
+/* echo 服务端压测工具，示例：gradlew echoLoadTest --args="--clients=50000 --duration=0" */
+tasks.register('echoLoadTest', JavaExec) {
+    group = 'application'
+    description = '运行 echo 服务端压测工具，参数通过 --args 传入'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'org.example.simple.util.echo.EchoServerUtils'
+    standardInput = System.in
+}
+
 /* Gradle 指定编码,Java 编译的时候缺省状态下会因为中文字符而失败 */
 [compileJava, compileTestJava, javadoc]*.options*.encoding = 'UTF-8'
 tasks.withType(JavaCompile).configureEach {
