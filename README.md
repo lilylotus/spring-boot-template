@@ -27,4 +27,6 @@ IP 范围匹配工具使用说明见 [IpRangeCheckUtils](docs/IpRangeCheckUtils�
 
 常用数据结构（链表、栈、队列、双端队列、二叉搜索树、红黑树、AVL 树、B 树、B+ 树）使用说明见 [常用数据结构](docs/常用数据结构使用说明.md)。
 
+限流算法（固定窗口计数、滑动窗口、滑动窗口计数、漏桶、令牌桶）使用说明见 [限流算法](docs/限流算法使用说明.md)。
+
 回显服务端压测工具使用说明见 [EchoServerUtils](docs/EchoServerUtils使用说明.md)。
