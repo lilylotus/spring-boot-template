@@ -26,6 +26,7 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 import com.example.template.file.exception.FileStorageException;
 import com.example.template.response.RestResult;
 import com.example.template.response.RestResultUtils;
+import com.example.template.transfer.exception.TransferException;
 
 /**
  * REST 接口全局异常处理器，统一把常见请求错误和未预期异常转换为 {@link RestResult}。
@@ -193,6 +194,19 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(FileStorageException.class)
     public ResponseEntity<RestResult<Void>> handleFileStorageException(FileStorageException exception) {
+        return ResponseEntity.status(exception.getHttpStatus())
+            .body(RestResultUtils.failure(exception.getHttpStatus().value(), exception.getMessage()));
+    }
+
+    /**
+     * 处理转账流程中可预期的业务异常(账户不存在、余额不足、重复请求处理中、幂等键冲突等)，
+     * 按异常自带的 HTTP 状态码返回。
+     *
+     * @param exception 转账业务异常
+     * @return 异常自带状态码的统一错误响应
+     */
+    @ExceptionHandler(TransferException.class)
+    public ResponseEntity<RestResult<Void>> handleTransferException(TransferException exception) {
         return ResponseEntity.status(exception.getHttpStatus())
             .body(RestResultUtils.failure(exception.getHttpStatus().value(), exception.getMessage()));
     }
