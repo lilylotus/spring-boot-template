@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.BeanNotOfRequiredTypeException;
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
@@ -31,6 +32,16 @@ class SpringContextHolderTest {
 
     private AnnotationConfigApplicationContext context;
 
+    /**
+     * 每个测试开始前也清空一次静态引用：全量测试时同一个 JVM 里先执行的 {@code @SpringBootTest}
+     * 会把它自己的容器留在 {@link SpringContextHolder} 的静态字段里，只在 {@code @AfterEach} 清理的话，
+     * 本类第一个执行的"容器未就绪"用例会读到那个残留的容器而失败。
+     */
+    @BeforeEach
+    void setUp() throws Exception {
+        clearHolder();
+    }
+
     @AfterEach
     void tearDown() throws Exception {
         if (context != null) {
@@ -39,6 +50,13 @@ class SpringContextHolderTest {
         }
         // 每个测试结束后都清空静态引用，避免上一个测试构造的容器实例串扰下一个测试
         // （尤其是验证"容器未就绪"场景时，需要确保静态字段确实是 null）。
+        clearHolder();
+    }
+
+    /**
+     * 通过反射把 {@link SpringContextHolder} 持有的静态容器引用置空。
+     */
+    private void clearHolder() throws Exception {
         Field field = SpringContextHolder.class.getDeclaredField("applicationContext");
         field.setAccessible(true);
         field.set(null, null);
