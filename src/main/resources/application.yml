@@ -179,7 +179,9 @@ springdoc:
     disable-swagger-default-url: true
 
   # 只扫描指定包路径，避免扫描到不必要的类拖慢启动、暴露不该暴露的接口
-  packages-to-scan: com.example.template.controller
+  # 多个包用英文逗号分隔；按功能分包的模块(file、transfer)控制器不在顶层controller包下，需要单独列出，
+  # 否则接口能正常访问但不会出现在/v3/api-docs和Swagger UI中
+  packages-to-scan: com.example.template.controller,com.example.template.file.controller,com.example.template.transfer.controller
   # paths-to-match: /api/**
 
   # 生产环境关闭默认的"try it out"发起真实请求，只保留文档展示功能
