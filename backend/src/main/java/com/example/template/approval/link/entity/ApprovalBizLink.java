@@ -43,6 +43,9 @@ public class ApprovalBizLink {
 
     private String approverSnapshot;
 
+    /** 发起时的有序逻辑节点结构 JSON（节点ID、指派类型、用户ID或组ID），不含组成员；历史实例为空。 */
+    private String nodeSnapshot;
+
     private String payloadSnapshot;
 
     private LocalDateTime createdTime;

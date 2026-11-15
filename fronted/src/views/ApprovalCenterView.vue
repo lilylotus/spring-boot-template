@@ -58,6 +58,19 @@ function approvalUserName(bizType: string, bizId: string): string {
   return user?.realName?.trim() || bizId
 }
 
+/** 判断是否为用户组节点；缺少 assigneeType 时有 groupId 视为用户组。 */
+function isGroupAssignment(row: Pick<ApprovalTask, 'assigneeType' | 'groupId'>): boolean {
+  if (row.assigneeType) return row.assigneeType === 'GROUP'
+  return row.groupId !== null && row.groupId !== undefined
+}
+
+/** 用户组展示名称；审批记录中为处理时的用户组名称。 */
+function groupLabel(row: Pick<ApprovalTask, 'groupId' | 'groupName'>): string {
+  const name = row.groupName?.trim()
+  if (name) return name
+  return row.groupId !== null && row.groupId !== undefined ? `ID ${row.groupId}` : '名称不可用'
+}
+
 function actionLabel(action: ApprovalAction): string {
   return action === 'AGREE' ? '同意' : '驳回'
 }
@@ -190,6 +203,12 @@ loadUsersForDisplay()
             <el-table-column prop="level" label="级别" width="88">
               <template #default="{ row }">第 {{ row.level }} 级</template>
             </el-table-column>
+            <el-table-column label="审批方式" min-width="170" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span v-if="isGroupAssignment(row)" class="assignment assignment--group">用户组：{{ groupLabel(row) }}</span>
+                <span v-else class="assignment">指定用户</span>
+              </template>
+            </el-table-column>
             <el-table-column prop="taskTitle" label="任务标题" min-width="180" show-overflow-tooltip />
             <el-table-column prop="createdTime" label="到达时间" width="180" />
             <el-table-column label="操作" width="180" fixed="right">
@@ -219,6 +238,12 @@ loadUsersForDisplay()
             </el-table-column>
             <el-table-column prop="level" label="级别" width="88">
               <template #default="{ row }">第 {{ row.level }} 级</template>
+            </el-table-column>
+            <el-table-column label="审批方式" min-width="170" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span v-if="isGroupAssignment(row)" class="assignment assignment--group">用户组：{{ groupLabel(row) }}</span>
+                <span v-else class="assignment">指定用户</span>
+              </template>
             </el-table-column>
             <el-table-column prop="taskTitle" label="任务标题" min-width="170" show-overflow-tooltip />
             <el-table-column label="结果" width="88">
@@ -323,6 +348,15 @@ loadUsersForDisplay()
 
 .approval-tabs :deep(.el-tabs__item) {
   height: 52px;
+  font-weight: 500;
+}
+
+.assignment {
+  color: var(--el-text-color-regular);
+}
+
+.assignment--group {
+  color: var(--el-color-primary);
   font-weight: 500;
 }
 

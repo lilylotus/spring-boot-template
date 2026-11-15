@@ -40,6 +40,8 @@ import com.example.template.common.BusinessException;
 import com.example.template.util.JacksonUtils;
 import com.example.template.usergroup.service.UserGroupService;
 import com.example.template.approval.config.design.GroupAssignment;
+import com.example.template.approval.config.design.ApprovalNodeSnapshot;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.example.template.approval.link.mapper.ApprovalBizLinkMapper;
 import com.example.template.approval.api.dto.ApprovalMemberActionView;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
@@ -55,6 +57,10 @@ import org.springframework.transaction.annotation.Isolation;
 public class FlowableApprovalGateway implements ApprovalGateway {
 
     private static final String GLOBAL_SCOPE = "GLOBAL";
+
+    /** 实例逻辑节点快照 JSON 的反序列化类型。 */
+    private static final TypeReference<List<ApprovalNodeSnapshot>> NODE_SNAPSHOT_LIST_TYPE = new TypeReference<>() {
+    };
 
     private final RuntimeService runtimeService;
     private final TaskService taskService;
@@ -97,6 +103,10 @@ public class FlowableApprovalGateway implements ApprovalGateway {
         link.setStatus(ApprovalStatus.PENDING.name());
         link.setInitiatorUserId(command.initiatorUserId());
         link.setApproverSnapshot(JacksonUtils.toJson(approverList));
+        // 逻辑节点快照只含节点ID、指派类型和用户/组ID，不保存组成员；approver_snapshot 照常写入用于兜底。
+        if (template.nodes() != null && !template.nodes().isEmpty()) {
+            link.setNodeSnapshot(JacksonUtils.toJson(template.nodes()));
+        }
         link.setPayloadSnapshot(command.payloadSnapshot());
         approvalBizLinkService.save(link);
 
@@ -176,6 +186,7 @@ public class FlowableApprovalGateway implements ApprovalGateway {
         record.setBizId(link.getBizId());
         record.setProcessInstanceId(link.getProcessInstanceId());
         record.setTaskId(task.getId());
+        record.setNodeId(resolveNodeId(resolveNodeSnapshots(link), resolveLevel(task)));
         record.setApproverUserId(command.approverUserId());
         record.setGroupId(groupId);
         if (groupId != null) {
@@ -221,9 +232,12 @@ public class FlowableApprovalGateway implements ApprovalGateway {
             LocalDateTime createdTime = toLocalDateTime(task);
             String target = assignment(task);
             Long groupId = GroupAssignment.isGroup(target) ? GroupAssignment.id(target) : null;
-            result.add(new ApprovalTaskView(link.getId(), link.getBizType(), link.getBizId(), resolveLevel(task),
+            int level = resolveLevel(task);
+            result.add(new ApprovalTaskView(link.getId(), link.getBizType(), link.getBizId(), level,
                     taskTitle(task), createdTime, groupId, groupId == null ? null : userGroupService.get(groupId).name(),
-                    groupId != null && allRejected(userGroupService.activeMembers(groupId), taskVotes(task))));
+                    groupId != null && allRejected(userGroupService.activeMembers(groupId), taskVotes(task)),
+                    resolveNodeId(resolveNodeSnapshots(link), level),
+                    groupId == null ? ApprovalNodeSnapshot.TYPE_USER : ApprovalNodeSnapshot.TYPE_GROUP));
         }
         return result;
     }
@@ -265,7 +279,8 @@ public class FlowableApprovalGateway implements ApprovalGateway {
                         link.getProcessInstanceId(), "initiatorUserId"));
         ApprovalStatus status = ApprovalStatus.valueOf(link.getStatus());
         Integer currentLevel = activeTask == null ? null : resolveLevel(activeTask);
-        List<ApprovalNodeView> nodes = buildNodes(approvers, actionRecords, activeTask, status, currentLevel);
+        List<ApprovalNodeView> nodes = buildNodes(approvers, resolveNodeSnapshots(link), actionRecords, activeTask,
+                status, currentLevel);
 
         return new ApprovalDetailView(
                 link.getId(),
@@ -296,7 +311,35 @@ public class FlowableApprovalGateway implements ApprovalGateway {
                 ApprovalAction.valueOf(record.getAction()),
                 record.getComment(),
                 record.getTaskCreatedTime(),
-                record.getActedTime());
+                record.getActedTime(),
+                record.getNodeId(),
+                record.getGroupId() == null ? ApprovalNodeSnapshot.TYPE_USER : ApprovalNodeSnapshot.TYPE_GROUP,
+                record.getGroupId(),
+                record.getGroupName());
+    }
+
+    /**
+     * 读取实例发起时保存的有序逻辑节点快照。
+     *
+     * @param link 审批业务关联
+     * @return 逻辑节点列表；历史实例没有节点快照时返回空列表
+     */
+    private List<ApprovalNodeSnapshot> resolveNodeSnapshots(ApprovalBizLink link) {
+        if (link.getNodeSnapshot() == null) {
+            return List.of();
+        }
+        return JacksonUtils.toObj(link.getNodeSnapshot(), NODE_SNAPSHOT_LIST_TYPE);
+    }
+
+    /**
+     * 按审批级别取逻辑节点ID。
+     *
+     * @param snapshots 实例的有序逻辑节点快照
+     * @param level     审批级别，从1开始
+     * @return 逻辑节点ID；没有快照或级别超出范围时为空
+     */
+    private String resolveNodeId(List<ApprovalNodeSnapshot> snapshots, int level) {
+        return level >= 1 && level <= snapshots.size() ? snapshots.get(level - 1).nodeId() : null;
     }
 
     /** 查询当前顺序节点的唯一活动任务。 */
@@ -369,9 +412,10 @@ public class FlowableApprovalGateway implements ApprovalGateway {
         return value instanceof String stringValue ? stringValue : JacksonUtils.toJson(value);
     }
 
-    /** 按实例有序指派构建个人和组节点，分别聚合最终状态与投票。 */
+    /** 按实例有序指派构建个人和组节点，分别聚合最终状态与投票；逻辑节点ID取自节点快照，历史实例为空。 */
     private List<ApprovalNodeView> buildNodes(
             List<String> approvers,
+            List<ApprovalNodeSnapshot> snapshots,
             List<ApprovalActionRecord> actionRecords,
             Task activeTask,
             ApprovalStatus approvalStatus,
@@ -394,15 +438,16 @@ public class FlowableApprovalGateway implements ApprovalGateway {
         List<ApprovalNodeView> nodes = new ArrayList<>();
         for (int level = 1; level <= nodeCount; level++) {
             if (level <= approvers.size() && GroupAssignment.isGroup(approvers.get(level - 1))) {
-                nodes.add(groupNode(level, approvers.get(level - 1), actionRecords, activeTask,
-                        approvalStatus, currentLevel, rejectedLevel));
+                nodes.add(groupNode(level, approvers.get(level - 1), resolveNodeId(snapshots, level), actionRecords,
+                        activeTask, approvalStatus, currentLevel, rejectedLevel));
                 continue;
             }
             ApprovalActionRecord record = recordByLevel.get(level);
             boolean isCurrent = currentLevel != null && currentLevel == level;
             String approverUserId = resolveNodeApprover(approvers, record, activeTask, level, isCurrent);
             ApprovalNodeStatus nodeStatus = resolveNodeStatus(record, approvalStatus, rejectedLevel, level, isCurrent);
-            nodes.add(toApprovalNodeView(level, approverUserId, nodeStatus, record, activeTask, isCurrent));
+            nodes.add(toApprovalNodeView(level, approverUserId, nodeStatus, record, activeTask, isCurrent,
+                    resolveNodeId(snapshots, level)));
         }
         return nodes;
     }
@@ -450,7 +495,8 @@ public class FlowableApprovalGateway implements ApprovalGateway {
             ApprovalNodeStatus nodeStatus,
             ApprovalActionRecord record,
             Task activeTask,
-            boolean isCurrent) {
+            boolean isCurrent,
+            String nodeId) {
         if (record != null) {
             return new ApprovalNodeView(
                     level,
@@ -460,7 +506,9 @@ public class FlowableApprovalGateway implements ApprovalGateway {
                     ApprovalAction.valueOf(record.getAction()),
                     record.getComment(),
                     record.getTaskCreatedTime(),
-                    record.getActedTime());
+                    record.getActedTime(),
+                    null, null, List.of(), List.of(),
+                    nodeId, ApprovalNodeSnapshot.TYPE_USER);
         }
         return new ApprovalNodeView(
                 level,
@@ -470,7 +518,9 @@ public class FlowableApprovalGateway implements ApprovalGateway {
                 null,
                 null,
                 isCurrent && activeTask != null ? toLocalDateTime(activeTask) : null,
-                null);
+                null,
+                null, null, List.of(), List.of(),
+                nodeId, ApprovalNodeSnapshot.TYPE_USER);
     }
 
 
@@ -534,7 +584,7 @@ public class FlowableApprovalGateway implements ApprovalGateway {
     }
 
     /** 聚合组节点结果与实际动作；当前成员只用于展示，不重新计算已完成结果。 */
-    private ApprovalNodeView groupNode(int level, String target, List<ApprovalActionRecord> records,
+    private ApprovalNodeView groupNode(int level, String target, String nodeId, List<ApprovalActionRecord> records,
                                        Task activeTask, ApprovalStatus status, Integer currentLevel,
                                        Integer rejectedLevel) {
         Long groupId = GroupAssignment.id(target);
@@ -561,7 +611,8 @@ public class FlowableApprovalGateway implements ApprovalGateway {
                 nodeStatus == ApprovalNodeStatus.PENDING || decisive == null ? null : decisive.getActedTime(),
                 groupId, group.name(), group.activeMemberIds(),
                 votes.stream().map(record -> new ApprovalMemberActionView(record.getApproverUserId(),
-                        record.getAction(), record.getComment(), record.getActedTime(), record.getGroupName())).toList());
+                        record.getAction(), record.getComment(), record.getActedTime(), record.getGroupName())).toList(),
+                nodeId, ApprovalNodeSnapshot.TYPE_GROUP);
     }
 
     /** 将引擎任务到达时间转换为本地时间。 */

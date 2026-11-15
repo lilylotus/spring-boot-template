@@ -5,6 +5,7 @@ backend/.gradle-user-home/**
 backend/.gradle-user/**
 
 *.jar
+.gradle-local/**
 
 HELP.md
 .gradle

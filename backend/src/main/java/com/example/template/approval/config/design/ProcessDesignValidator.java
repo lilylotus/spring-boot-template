@@ -19,6 +19,22 @@ public class ProcessDesignValidator {
 
     /** 验证节点、连线和指派目标，返回按路径排序的个人ID或组引用。 */
     public List<String> validateAndResolveApprovers(ProcessDesignModel model) {
+        return validateAndResolveNodes(model).stream()
+                .map(node -> ApprovalNodeSnapshot.TYPE_GROUP.equals(node.assigneeType())
+                        ? GroupAssignment.encode(node.groupId()) : node.approverUserId())
+                .toList();
+    }
+
+    /**
+     * 验证节点、连线和指派目标，返回按路径排序的逻辑节点指派快照。
+     * 校验规则与 {@link #validateAndResolveApprovers(ProcessDesignModel)} 完全一致；
+     * 缺少指派类型的旧节点按指定用户解释，结果不包含用户组成员。
+     *
+     * @param model 画布模型
+     * @return 按执行路径排序的逻辑节点（画布节点ID、指派类型、用户ID或组ID）
+     * @throws BusinessException 画布结构或指派配置不合法
+     */
+    public List<ApprovalNodeSnapshot> validateAndResolveNodes(ProcessDesignModel model) {
         if (model == null || model.getNodes() == null || model.getEdges() == null) {
             throw new BusinessException("流程模型不能为空");
         }
@@ -69,7 +85,7 @@ public class ProcessDesignValidator {
             throw new BusinessException("开始或结束节点连接不完整");
         }
 
-        List<String> approvers = new ArrayList<>();
+        List<ApprovalNodeSnapshot> approvers = new ArrayList<>();
         Set<String> visited = new HashSet<>();
         String current = startId;
         while (!current.equals(endId)) {
@@ -87,7 +103,8 @@ public class ProcessDesignValidator {
                             || StringUtils.hasText(nextNode.getApproverUserId())) {
                         throw new BusinessException("用户组节点必须且只能选择一个用户组");
                     }
-                    approvers.add(GroupAssignment.encode(nextNode.getApproverGroupId()));
+                    approvers.add(new ApprovalNodeSnapshot(nextNode.getId(), ApprovalNodeSnapshot.TYPE_GROUP,
+                            null, nextNode.getApproverGroupId()));
                 } else if (nextNode.getAssigneeType() != null && !"USER".equals(nextNode.getAssigneeType())) {
                     throw new BusinessException("不支持的审批指派类型");
                 } else if (!StringUtils.hasText(nextNode.getApproverUserId())) {
@@ -96,7 +113,8 @@ public class ProcessDesignValidator {
                     if (nextNode.getApproverGroupId() != null || GroupAssignment.isGroup(nextNode.getApproverUserId())) {
                         throw new BusinessException("指定用户节点不能包含用户组引用");
                     }
-                    approvers.add(nextNode.getApproverUserId());
+                    approvers.add(new ApprovalNodeSnapshot(nextNode.getId(), ApprovalNodeSnapshot.TYPE_USER,
+                            nextNode.getApproverUserId(), null));
                 }
             } else if (!"END".equals(nextNode.getType())) {
                 throw new BusinessException("开始节点只能位于流程起点");

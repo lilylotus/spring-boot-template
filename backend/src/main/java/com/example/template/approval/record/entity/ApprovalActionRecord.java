@@ -25,6 +25,9 @@ public class ApprovalActionRecord {
 
     private String taskId;
 
+    /** 处理时所属的逻辑节点ID（画布节点ID）；无节点快照的历史记录为空。 */
+    private String nodeId;
+
     private String approverUserId;
     private Long groupId;
     private String groupName;

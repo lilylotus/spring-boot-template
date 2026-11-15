@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { getApprovalDetail } from '../api/approval'
 import type {
   ApprovalDetail,
+  ApprovalNode,
   ApprovalNodeStatus,
   ApprovalStatus,
   UserApprovalFields,
@@ -127,6 +128,30 @@ function nodeStatusLabel(status: ApprovalNodeStatus): string {
 
 function actionLabel(action: 'AGREE' | 'REJECT'): string {
   return action === 'AGREE' ? '同意' : '驳回'
+}
+
+/** 判断是否为用户组节点；缺少 assigneeType 时有 groupId 视为用户组。 */
+function isGroupNode(node: ApprovalNode): boolean {
+  if (node.assigneeType) return node.assigneeType === 'GROUP'
+  return node.groupId !== null && node.groupId !== undefined
+}
+
+function groupLabel(node: ApprovalNode): string {
+  const name = node.groupName?.trim()
+  if (name) return name
+  return node.groupId !== null && node.groupId !== undefined ? `ID ${node.groupId}` : '名称不可用'
+}
+
+/** 用户组节点聚合后的最终结果说明。 */
+function groupResultLabel(node: ApprovalNode): string {
+  const labels: Record<ApprovalNodeStatus, string> = {
+    APPROVED: '已通过（任一成员同意即通过）',
+    REJECTED: '已驳回（当前有效成员全部驳回）',
+    PENDING: '待审批（等待组内成员处理）',
+    WAITING: '未开始',
+    SKIPPED: '已跳过',
+  }
+  return labels[node.status]
 }
 
 function userLabel(userId?: string | null): string {
@@ -287,7 +312,7 @@ watch(
           <ol v-else class="process-track">
             <li
               v-for="node in detail.nodes"
-              :key="`${node.level}-${node.approverUserId}`"
+              :key="node.nodeId || `${node.level}-${node.approverUserId}`"
               class="process-node"
               :class="`is-${node.status.toLowerCase()}`"
             >
@@ -295,7 +320,7 @@ watch(
               <div class="process-node__content">
                 <div class="process-node__topline">
                   <div>
-                    <strong>第 {{ node.level }} 级 · {{ node.groupId ? '用户组：' + node.groupName : userLabel(node.approverUserId) }}</strong>
+                    <strong>第 {{ node.level }} 级 · {{ isGroupNode(node) ? '用户组：' + groupLabel(node) : userLabel(node.approverUserId) }}</strong>
                     <span v-if="node.taskTitle">{{ node.taskTitle }}</span>
                   </div>
                   <el-tag
@@ -304,12 +329,33 @@ watch(
                   >{{ nodeStatusLabel(node.status) }}</el-tag>
                 </div>
                 <div v-if="node.status === 'PENDING'" class="current-point">当前审批点</div>
-                <template v-if="node.groupId">
-                  <p>当前有效成员：{{ node.currentMemberIds?.map(id => userLabel(id)).join('、') || '暂无（节点不可处理）' }}</p>
-                  <p v-for="vote in node.memberActions" :key="vote.userId">
-                    {{ userLabel(vote.userId) }} · {{ actionLabel(vote.action) }} · {{ vote.comment || '无意见' }} · {{ vote.actedTime }}
-                    <span v-if="vote.groupName">（处理时用户组：{{ vote.groupName }}）</span>
-                  </p>
+                <template v-if="isGroupNode(node)">
+                  <dl class="node-meta">
+                    <div><dt>节点结果</dt><dd class="group-result">{{ groupResultLabel(node) }}</dd></div>
+                    <div>
+                      <dt>当前有效成员</dt>
+                      <dd>{{ node.currentMemberIds?.map(id => userLabel(id)).join('、') || '暂无（节点不可处理）' }}</dd>
+                    </div>
+                  </dl>
+                  <div class="member-actions">
+                    <div class="member-actions__title">成员处理记录</div>
+                    <p v-if="!node.memberActions?.length" class="member-actions__empty">暂无成员处理记录</p>
+                    <ul v-else>
+                      <li v-for="(vote, index) in node.memberActions" :key="`${vote.userId}-${vote.actedTime}-${index}`">
+                        <div class="member-actions__line">
+                          <strong>{{ userLabel(vote.userId) }}</strong>
+                          <el-tag :type="vote.action === 'AGREE' ? 'success' : 'danger'" effect="light" size="small">
+                            {{ actionLabel(vote.action) }}
+                          </el-tag>
+                          <time>{{ vote.actedTime || '-' }}</time>
+                        </div>
+                        <dl class="node-meta member-actions__meta">
+                          <div><dt>审批意见</dt><dd>{{ vote.comment || '无' }}</dd></div>
+                          <div v-if="vote.groupName"><dt>处理时用户组</dt><dd>{{ vote.groupName }}</dd></div>
+                        </dl>
+                      </li>
+                    </ul>
+                  </div>
                 </template>
                 <dl class="node-meta">
                   <div v-if="node.action"><dt>审批动作</dt><dd>{{ actionLabel(node.action) }}</dd></div>
@@ -600,6 +646,76 @@ watch(
 
 .node-meta {
   margin-top: 8px;
+}
+
+.node-meta dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.node-meta .group-result {
+  color: var(--el-text-color-primary);
+  font-weight: 600;
+}
+
+.member-actions {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  background: var(--el-fill-color-lighter);
+}
+
+.member-actions__title {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.member-actions__empty {
+  margin: 6px 0 0;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.member-actions ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.member-actions li {
+  padding: 8px 0;
+}
+
+.member-actions li + li {
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.member-actions li:last-child {
+  padding-bottom: 0;
+}
+
+.member-actions__line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 13px;
+}
+
+.member-actions__line strong {
+  color: var(--el-text-color-primary);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.member-actions__line time {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.node-meta.member-actions__meta {
+  margin-top: 5px;
 }
 
 @media (max-width: 620px) {

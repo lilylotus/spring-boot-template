@@ -2,6 +2,26 @@ package com.example.template.approval.engine.flowable;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import org.flowable.engine.RuntimeService;
+import com.example.template.approval.config.entity.ApprovalChainConfig;
+import com.example.template.approval.config.entity.ApprovalProcessTemplate;
+import com.example.template.approval.config.entity.ApprovalProcessTemplateVersion;
+import com.example.template.approval.config.mapper.ApprovalChainConfigMapper;
+import com.example.template.approval.config.mapper.ApprovalProcessTemplateMapper;
+import com.example.template.approval.config.mapper.ApprovalProcessTemplateVersionMapper;
+import com.example.template.approval.link.entity.ApprovalBizLink;
+import com.example.template.approval.link.mapper.ApprovalBizLinkMapper;
+import com.example.template.approval.record.entity.ApprovalActionRecord;
+import com.example.template.approval.record.mapper.ApprovalActionRecordMapper;
+import com.example.template.usergroup.entity.UserGroupMember;
+import com.example.template.usergroup.mapper.UserGroupMapper;
+import com.example.template.usergroup.mapper.UserGroupMemberMapper;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -29,6 +49,16 @@ class GroupApprovalIntegrationTest {
     @Autowired private UserGroupService groups;
     @Autowired private SysUserMapper users;
     @Autowired private ApplicationContext context;
+    @Autowired private ApprovalBizLinkMapper linkMapper;
+    @Autowired private ApprovalActionRecordMapper recordMapper;
+    @Autowired private ApprovalChainConfigMapper chainMapper;
+    @Autowired private ApprovalProcessTemplateMapper templateMapper;
+    @Autowired private ApprovalProcessTemplateVersionMapper versionMapper;
+    @Autowired private UserGroupMapper groupMapper;
+    @Autowired private UserGroupMemberMapper groupMemberMapper;
+    @Autowired private RuntimeService runtimeService;
+    /** 标记本例夹具是否真实提交（并发用例不使用测试事务），为真时在用例结束后清理。 */
+    private boolean committedFixture;
     private Long alice;
     private Long bob;
     private Long carol;
@@ -157,6 +187,212 @@ class GroupApprovalIntegrationTest {
     void emptyGroup_rejectsPublish() {
         replace(List.of(), "ACTIVE");
         assertThatThrownBy(() -> publish(false)).isInstanceOf(BusinessException.class);
+    }
+
+    /** 任一成员同意即通过节点：其他成员待办消失且不能再处理，只保留一条真实动作。 */
+    @Test
+    void anyMemberAgreement_passesNodeAndRemovesOtherMembersTodo() {
+        publish(false);
+        start();
+        assertThat(pending(alice)).isTrue();
+        assertThat(pending(bob)).isTrue();
+        act(alice, ApprovalAction.AGREE);
+        assertThat(pending(alice)).isFalse();
+        assertThat(pending(bob)).isFalse();
+        assertThat(gateway.queryByBizKey(bizType, bizId).status()).isEqualTo(ApprovalStatus.APPROVED);
+        assertThatThrownBy(() -> act(bob, ApprovalAction.AGREE)).isInstanceOf(BusinessException.class);
+        ApprovalNodeView node = detail(alice).nodes().get(0);
+        assertThat(node.status()).isEqualTo(ApprovalNodeStatus.APPROVED);
+        assertThat(node.memberActions()).singleElement()
+                .satisfies(vote -> assertThat(vote.userId()).isEqualTo(alice.toString()));
+        assertThat(gateway.listApprovalRecords(bob.toString())).noneMatch(record -> bizId.equals(record.bizId()));
+    }
+
+    /** 待办、审批记录和详情节点都应返回逻辑节点ID、指派类型及用户组名称，快照不含组成员。 */
+    @Test
+    void views_exposeNodeIdAssigneeTypeAndGroupName() {
+        publish(true);
+        start();
+        assertThat(links.findLatestByBizKey(bizType, bizId).orElseThrow().getNodeSnapshot()).isEqualTo(
+                "[{\"nodeId\":\"group\",\"assigneeType\":\"GROUP\",\"groupId\":" + group.id() + "},"
+                        + "{\"nodeId\":\"personal\",\"assigneeType\":\"USER\",\"approverUserId\":\"" + alice + "\"}]");
+
+        assertThat(task(bob)).satisfies(task -> {
+            assertThat(task.nodeId()).isEqualTo("group");
+            assertThat(task.assigneeType()).isEqualTo("GROUP");
+            assertThat(task.groupId()).isEqualTo(group.id());
+            assertThat(task.groupName()).isEqualTo("审核组");
+        });
+        act(bob, ApprovalAction.AGREE);
+        assertThat(task(alice)).satisfies(task -> {
+            assertThat(task.nodeId()).isEqualTo("personal");
+            assertThat(task.assigneeType()).isEqualTo("USER");
+            assertThat(task.groupId()).isNull();
+            assertThat(task.groupName()).isNull();
+        });
+        act(alice, ApprovalAction.AGREE);
+
+        // 组改名后，审批记录仍返回处理时的组名称。
+        group = groups.save(group.id(), new UserGroupRequest(group.code(), "改名后的组", "",
+                "ACTIVE", group.revision(), List.of(alice, bob)), "test");
+        assertThat(record(bob)).satisfies(record -> {
+            assertThat(record.nodeId()).isEqualTo("group");
+            assertThat(record.assigneeType()).isEqualTo("GROUP");
+            assertThat(record.groupId()).isEqualTo(group.id());
+            assertThat(record.groupName()).isEqualTo("审核组");
+        });
+        assertThat(record(alice)).satisfies(record -> {
+            assertThat(record.nodeId()).isEqualTo("personal");
+            assertThat(record.assigneeType()).isEqualTo("USER");
+            assertThat(record.groupId()).isNull();
+            assertThat(record.groupName()).isNull();
+        });
+
+        List<ApprovalNodeView> nodes = detail(alice).nodes();
+        assertThat(nodes).extracting(ApprovalNodeView::nodeId).containsExactly("group", "personal");
+        assertThat(nodes).extracting(ApprovalNodeView::assigneeType).containsExactly("GROUP", "USER");
+        assertThat(nodes.get(0).groupId()).isEqualTo(group.id());
+        assertThat(nodes.get(0).groupName()).isEqualTo("改名后的组");
+        assertThat(nodes.get(0).memberActions()).singleElement()
+                .satisfies(vote -> assertThat(vote.groupName()).isEqualTo("审核组"));
+        assertThat(nodes.get(1).groupName()).isNull();
+    }
+
+    /** 没有节点快照的历史实例：节点ID为空，指派类型按组信息推断，动作记录不写节点ID。 */
+    @Test
+    void legacyInstanceWithoutNodeSnapshot_returnsNullNodeIdAndInferredAssigneeType() {
+        publish(true);
+        start();
+        Long approvalId = links.findLatestByBizKey(bizType, bizId).orElseThrow().getId();
+        linkMapper.update(null, Wrappers.<ApprovalBizLink>lambdaUpdate()
+                .eq(ApprovalBizLink::getId, approvalId).set(ApprovalBizLink::getNodeSnapshot, null));
+
+        assertThat(task(bob)).satisfies(task -> {
+            assertThat(task.nodeId()).isNull();
+            assertThat(task.assigneeType()).isEqualTo("GROUP");
+        });
+        act(bob, ApprovalAction.AGREE);
+        assertThat(task(alice)).satisfies(task -> {
+            assertThat(task.nodeId()).isNull();
+            assertThat(task.assigneeType()).isEqualTo("USER");
+        });
+        assertThat(record(bob)).satisfies(record -> {
+            assertThat(record.nodeId()).isNull();
+            assertThat(record.assigneeType()).isEqualTo("GROUP");
+            assertThat(record.groupName()).isEqualTo("审核组");
+        });
+        List<ApprovalNodeView> nodes = detail(alice).nodes();
+        assertThat(nodes).extracting(ApprovalNodeView::nodeId).containsOnlyNulls();
+        assertThat(nodes).extracting(ApprovalNodeView::assigneeType).containsExactly("GROUP", "USER");
+    }
+
+    /**
+     * 同组两个成员并发同意：只有一个成功推进节点，另一个得到业务异常，流程只前进一级且没有孤立动作记录。
+     * 并发线程各自使用独立事务，因此本例不使用测试事务回滚，夹具真实提交并在用例结束后清理。
+     */
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void concurrentAgreement_onlyOneMemberAdvancesNode() throws Exception {
+        committedFixture = true;
+        publish(true);
+        start();
+        String processInstanceId = links.findLatestByBizKey(bizType, bizId).orElseThrow().getProcessInstanceId();
+
+        List<Long> members = List.of(alice, bob);
+        CountDownLatch ready = new CountDownLatch(members.size());
+        CountDownLatch go = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(members.size());
+        Map<Long, Throwable> failures = new HashMap<>();
+        try {
+            Map<Long, Future<Throwable>> futures = new LinkedHashMap<>();
+            for (Long member : members) {
+                futures.put(member, pool.submit(() -> {
+                    ready.countDown();
+                    go.await();
+                    try {
+                        act(member, ApprovalAction.AGREE);
+                        return null;
+                    } catch (Throwable throwable) {
+                        return throwable;
+                    }
+                }));
+            }
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            go.countDown();
+            for (Map.Entry<Long, Future<Throwable>> entry : futures.entrySet()) {
+                Throwable failure = entry.getValue().get(60, TimeUnit.SECONDS);
+                if (failure != null) {
+                    failures.put(entry.getKey(), failure);
+                }
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        // 恰好一个成员失败，且失败是“已被处理”类业务异常而非引擎或数据库异常。
+        assertThat(failures).hasSize(1);
+        Long loser = failures.keySet().iterator().next();
+        Long winner = loser.equals(alice) ? bob : alice;
+        assertThat(failures.get(loser)).isInstanceOf(BusinessException.class);
+
+        // 流程只前进一级，动作记录只有胜出成员的一条，没有孤立记录。
+        ApprovalInstanceView afterRace = gateway.queryByBizKey(bizType, bizId);
+        assertThat(afterRace.status()).isEqualTo(ApprovalStatus.PENDING);
+        assertThat(afterRace.currentLevel()).isEqualTo(2);
+        assertThat(recordMapper.selectList(Wrappers.<ApprovalActionRecord>lambdaQuery()
+                .eq(ApprovalActionRecord::getProcessInstanceId, processInstanceId)))
+                .singleElement().satisfies(record -> {
+                    assertThat(record.getApproverUserId()).isEqualTo(winner.toString());
+                    assertThat(record.getLevelNo()).isEqualTo(1);
+                    assertThat(record.getNodeId()).isEqualTo("group");
+                    assertThat(record.getAction()).isEqualTo(ApprovalAction.AGREE.name());
+                });
+        assertThat(gateway.listApprovalRecords(loser.toString())).noneMatch(record -> bizId.equals(record.bizId()));
+
+        // 后续个人节点仍可正常完成，说明并发冲突没有破坏流程状态。
+        act(alice, ApprovalAction.AGREE);
+        assertThat(gateway.queryByBizKey(bizType, bizId).status()).isEqualTo(ApprovalStatus.APPROVED);
+    }
+
+    /** 清理并发用例真实提交的夹具；事务回滚的用例无需处理。 */
+    @AfterEach
+    void cleanupCommittedFixture() {
+        if (!committedFixture) {
+            return;
+        }
+        runtimeService.createProcessInstanceQuery().processInstanceBusinessKey(bizType + ":" + bizId).list()
+                .forEach(instance -> runtimeService.deleteProcessInstance(instance.getId(), "测试清理"));
+        recordMapper.delete(Wrappers.<ApprovalActionRecord>lambdaQuery().eq(ApprovalActionRecord::getBizType, bizType));
+        linkMapper.delete(Wrappers.<ApprovalBizLink>lambdaQuery().eq(ApprovalBizLink::getBizType, bizType));
+        chainMapper.delete(Wrappers.<ApprovalChainConfig>lambdaQuery().eq(ApprovalChainConfig::getBizType, bizType));
+        for (ApprovalProcessTemplate template : templateMapper.selectList(
+                Wrappers.<ApprovalProcessTemplate>lambdaQuery().eq(ApprovalProcessTemplate::getBizType, bizType))) {
+            versionMapper.delete(Wrappers.<ApprovalProcessTemplateVersion>lambdaQuery()
+                    .eq(ApprovalProcessTemplateVersion::getTemplateId, template.getId()));
+            templateMapper.deleteById(template.getId());
+        }
+        if (group != null) {
+            groupMemberMapper.delete(Wrappers.<UserGroupMember>lambdaQuery()
+                    .eq(UserGroupMember::getGroupId, group.id()));
+            groupMapper.deleteById(group.id());
+        }
+        for (Long userId : Arrays.asList(alice, bob, carol)) {
+            if (userId != null) {
+                users.deleteById(userId);
+            }
+        }
+    }
+
+    /** 读取指定用户在本例业务上的唯一待办。 */
+    private ApprovalTaskView task(Long userId) {
+        return gateway.listPendingTasks(userId.toString()).stream()
+                .filter(task -> bizId.equals(task.bizId())).findFirst().orElseThrow();
+    }
+
+    /** 读取指定用户在本例业务上的唯一审批记录。 */
+    private ApprovalRecordView record(Long userId) {
+        return gateway.listApprovalRecords(userId.toString()).stream()
+                .filter(record -> bizId.equals(record.bizId())).findFirst().orElseThrow();
     }
 
     /** 构建指定路径模板，按需追加个人节点验证混合指派。 */

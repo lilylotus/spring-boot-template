@@ -168,10 +168,43 @@ function changeAssigneeType() {
   delete selectedNode.value.approverGroupId
 }
 
+function groupStatusLabel(group: UserGroup): string {
+  return group.status === 'ACTIVE' ? '启用' : '停用'
+}
+
+/** 用户组是否可用于审批节点：启用且至少有一名有效成员。 */
+function isGroupUsable(group: UserGroup): boolean {
+  return group.status === 'ACTIVE' && group.activeMemberIds.length > 0
+}
+
+function groupOptionLabel(group: UserGroup): string {
+  return `${group.name}（${groupStatusLabel(group)} · 有效 ${group.activeMemberIds.length} 人）`
+}
+
+/** 属性面板中当前选中的用户组；未选择或已不存在时为 undefined。 */
+const selectedGroup = computed(() => {
+  const node = selectedNode.value
+  if (!node || node.assigneeType !== 'GROUP' || node.approverGroupId == null) return undefined
+  return groups.value.find(group => group.id === node.approverGroupId)
+})
+
+/** 已选用户组不可用时的提示文案，可用或未选择时为空。 */
+const selectedGroupWarning = computed(() => {
+  const node = selectedNode.value
+  if (!node || node.assigneeType !== 'GROUP' || node.approverGroupId == null) return ''
+  if (groupsFailed.value) return '用户组加载失败，无法确认所选用户组状态，请刷新用户组。'
+  const group = selectedGroup.value
+  if (!group) return '所选用户组已不存在，请重新选择。'
+  if (group.status !== 'ACTIVE') return '所选用户组已停用，无法发布，请启用该组或重新选择。'
+  if (group.activeMemberIds.length === 0) return '所选用户组没有有效成员，无法发布，请先维护成员或重新选择。'
+  return ''
+})
+
 function assignmentLabel(node: ProcessDesignNode): string {
   if (node.assigneeType !== 'GROUP') return userLabel(node.approverUserId)
   const group = groups.value.find(item => item.id === node.approverGroupId)
-  return group ? group.name + '（有效 ' + group.activeMemberIds.length + ' 人）' : '请选择有效用户组'
+  if (!group) return '请选择有效用户组'
+  return group.name + '（' + (group.status === 'ACTIVE' ? '' : '已停用 · ') + '有效 ' + group.activeMemberIds.length + ' 人）'
 }
 
 function nodeTitle(node: ProcessDesignNode): string {
@@ -222,7 +255,7 @@ function validateGraph(): string[] {
     problems.push('存在已失效的审批人，请重新选择')
   }
   if (approvals.some(node => node.assigneeType === 'GROUP' && (groupsFailed.value
-      || !groups.value.some(group => group.id === node.approverGroupId && group.activeMemberIds.length > 0)))) {
+      || !groups.value.some(group => group.id === node.approverGroupId && isGroupUsable(group))))) {
     problems.push('用户组不存在、停用、无有效成员或加载失败，请刷新用户组')
   }
   const incoming = new Map<string, number>()
@@ -404,9 +437,17 @@ onBeforeUnmount(() => window.removeEventListener('pointermove', handlePointerMov
               <el-option label="用户组（任一成员同意）" value="GROUP" />
             </el-select>
             <template v-if="selectedNode.assigneeType === 'GROUP'">
+              <label>用户组</label>
               <el-select v-model="selectedNode.approverGroupId" filterable placeholder="选择用户组">
-                <el-option v-for="group in groups" :key="group.id" :label="group.name + '（' + group.activeMemberIds.length + '人）'" :value="group.id" :disabled="!group.activeMemberIds.length" />
+                <el-option v-for="group in groups" :key="group.id" :label="groupOptionLabel(group)" :value="group.id" :disabled="!isGroupUsable(group)" />
               </el-select>
+              <div v-if="selectedGroup" class="group-status">
+                <el-tag :type="selectedGroup.status === 'ACTIVE' ? 'success' : 'info'" size="small" effect="light">
+                  {{ groupStatusLabel(selectedGroup) }}
+                </el-tag>
+                <span>有效成员 {{ selectedGroup.activeMemberIds.length }} 人</span>
+              </div>
+              <p v-if="selectedGroupWarning" class="group-warning" role="alert">{{ selectedGroupWarning }}</p>
               <p>审批时使用组内最新有效成员，任一人同意即通过，全部当前成员驳回才终止。</p>
             </template>
             <template v-else>
@@ -474,6 +515,8 @@ onBeforeUnmount(() => window.removeEventListener('pointermove', handlePointerMov
 .inspector :deep(.el-select) { width: 100%; }
 .inspector :deep(.el-button) { width: 100%; margin-top: 12px; }
 .node-type { overflow: hidden; color: var(--el-text-color-secondary); font-size: 12px; text-overflow: ellipsis; }
+.group-status { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; color: var(--el-text-color-regular); font-size: 12px; }
+.group-warning { margin: 8px 0 0; padding: 7px 9px; border-radius: 4px; background: var(--el-color-warning-light-9); color: var(--el-color-warning-dark-2); font-size: 12px; line-height: 1.5; }
 .validation-list { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--el-border-color-lighter); }
 .validation-list h4 { margin: 0 0 8px; color: var(--el-color-danger); font-size: 13px; }
 .validation-list p { margin: 5px 0; color: var(--el-color-danger); font-size: 12px; line-height: 1.45; }

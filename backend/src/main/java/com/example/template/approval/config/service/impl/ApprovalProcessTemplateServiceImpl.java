@@ -179,10 +179,13 @@ public class ApprovalProcessTemplateServiceImpl implements ApprovalProcessTempla
         if (version == null) {
             throw new BusinessException("业务动作[" + bizType + "]的生效流程版本不存在");
         }
-        List<String> approvers = validator.validateAndResolveApprovers(parseModel(version.getModelJson()));
+        ProcessDesignModel model = parseModel(version.getModelJson());
+        List<String> approvers = validator.validateAndResolveApprovers(model);
         validateGroups(approvers);
+        // 逻辑节点快照与有序指派来自同一份已发布画布，顺序一一对应，且不含组成员。
         return new PublishedProcessTemplate(template.getId(), version.getId(), version.getVersionNo(),
-                template.getName(), version.getProcessDefinitionId(), version.getProcessDefinitionKey(), approvers);
+                template.getName(), version.getProcessDefinitionId(), version.getProcessDefinitionKey(), approvers,
+                validator.validateAndResolveNodes(model));
     }
 
     /** 查询不可变发布历史，标识当前激活版本。 */
